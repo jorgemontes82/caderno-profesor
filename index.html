@@ -72,6 +72,10 @@
     margin-bottom:9px;cursor:pointer;transition:border-color .15s;
   }
   .alumno-row:active,.alumno-row:hover{border-color:var(--azul-cmus);}
+  .swipe-wrap{position:relative;overflow:hidden;border-radius:var(--radius);margin-bottom:9px;}
+  .swipe-wrap .alumno-row{margin-bottom:0;}
+  .swipe-borrar{position:absolute;top:0;right:0;bottom:0;width:84px;background:var(--rojo);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;cursor:pointer;}
   .avatar{
     width:38px;height:38px;border-radius:50%;background:var(--azul-cmus);color:#fff;
     display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;flex-shrink:0;
@@ -994,10 +998,82 @@ async function xerarInformeSustitutoParaAno(anoEscolar) {
   return true;
 }
 
+const DISPOSITIVO_TACTIL = (() => {
+  try { return !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches); }
+  catch (e) { return false; }
+})();
+
+function FilaEliminable({ id, abertaId, onAbrirSwipe, onEliminar, children, className, anchoBoton }) {
+  const ANCHO = anchoBoton || 84;
+  const [offset, setOffset] = useState(0);
+  const [arrastrando, setArrastrando] = useState(false);
+  const inicioRef = useRef({ x: 0, offsetInicial: 0, moveuse: false });
+  const aberta = abertaId === id;
+  useEffect(() => { if (!aberta) setOffset(0); }, [aberta]);
+
+  if (!DISPOSITIVO_TACTIL) {
+    return (
+      <div style={{ display: "flex", alignItems: "stretch", gap: 8, marginBottom: 9 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
+        <button type="button" className="btn btn-danger" style={{ padding: "4px 9px", flexShrink: 0, alignSelf: "center" }}
+          onClick={(e)=>{ e.stopPropagation(); onEliminar(); }}>✕</button>
+      </div>
+    );
+  }
+
+  function onPointerDown(e) { inicioRef.current = { x: e.clientX, offsetInicial: offset, moveuse: false }; setArrastrando(true); }
+  function onPointerMove(e) {
+    if (!arrastrando) return;
+    const dx = e.clientX - inicioRef.current.x;
+    if (Math.abs(dx) > 5) inicioRef.current.moveuse = true;
+    setOffset(Math.max(-ANCHO, Math.min(0, inicioRef.current.offsetInicial + dx)));
+  }
+  function rematarArrastre() {
+    if (!arrastrando) return;
+    setArrastrando(false);
+    if (offset < -ANCHO/2) { setOffset(-ANCHO); onAbrirSwipe(id); }
+    else { setOffset(0); onAbrirSwipe(null); }
+  }
+  function clicCaptura(e) {
+    if (inicioRef.current.moveuse) { e.stopPropagation(); return; }
+    if (offset !== 0) { setOffset(0); onAbrirSwipe(null); e.stopPropagation(); }
+  }
+
+  return (
+    <div className="swipe-wrap">
+      <div className="swipe-borrar" style={{ width: ANCHO }} onClick={()=>onEliminar()}>Eliminar</div>
+      <div className={className}
+        style={{ transform: `translateX(${offset}px)`, transition: arrastrando ? "none" : "transform .18s ease", touchAction: "pan-y" }}
+        onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={rematarArrastre} onPointerCancel={rematarArrastre}
+        onClickCapture={clicCaptura}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function FilaAlumno({ m, abertaId, onAbrirSwipe, onAbrir, onEliminar }) {
+  return (
+    <FilaEliminable id={m.id} abertaId={abertaId} onAbrirSwipe={onAbrirSwipe} onEliminar={()=>onEliminar(m)} className="alumno-row-inner">
+      <div className="alumno-row" style={{ marginBottom: 0 }} onClick={() => onAbrir(m)}>
+        <div className="avatar">{(m.alumnos.nome||"?")[0].toUpperCase()}</div>
+        <div className="info">
+          <div className="nome">{m.alumnos.nome} {m.alumnos.apelidos}</div>
+          <div className="meta">{textoHorarios(m.horarioViolin)}</div>
+        </div>
+        <span className={"tag" + (m.grao === "profesional" ? " gp" : "")}>
+          {m.curso ? `${m.curso} ` : ""}{m.grao === "profesional" ? "G.P." : "G.E."}
+        </span>
+      </div>
+    </FilaEliminable>
+  );
+}
+
 function ListaAlumnos({ anoEscolar, onAbrir }) {
   const [filas, setFilas] = useState(null);
   const [busca, setBusca] = useState("");
   const [mostrarForm, setMostrarForm] = useState(false);
+  const [abertaId, setAbertaId] = useState(null);
 
   async function cargar() {
     const { data, error } = await sb
@@ -1026,6 +1102,14 @@ function ListaAlumnos({ anoEscolar, onAbrir }) {
     return filas.filter(m => `${m.alumnos.nome} ${m.alumnos.apelidos||""}`.toLowerCase().includes(q));
   }, [filas, busca]);
 
+  async function eliminarAlumno(m) {
+    setAbertaId(null);
+    if (!confirm(`Eliminar a ${m.alumnos.nome} ${m.alumnos.apelidos||""}? Bórranse TODOS os seus datos (clases, repertorio, cualificacións, titorías...) de TODOS os cursos escolares. Esta acción non se pode desfacer.`)) return;
+    const { error } = await sb.from("alumnos").delete().eq("id", m.alumnos.id);
+    if (error) { alert(error.message); return; }
+    cargar();
+  }
+
   return (
     <div className="wrap">
       <div className="toolbar">
@@ -1037,16 +1121,7 @@ function ListaAlumnos({ anoEscolar, onAbrir }) {
         <div className="empty">Non hai alumnos matriculados en {anoEscolar}.<br/>Toca “+” para engadir o primeiro.</div>
       )}
       {filtradas.map(m => (
-        <div key={m.id} className="alumno-row" onClick={() => onAbrir(m)}>
-          <div className="avatar">{(m.alumnos.nome||"?")[0].toUpperCase()}</div>
-          <div className="info">
-            <div className="nome">{m.alumnos.nome} {m.alumnos.apelidos}</div>
-            <div className="meta">{textoHorarios(m.horarioViolin)}</div>
-          </div>
-          <span className={"tag" + (m.grao === "profesional" ? " gp" : "")}>
-            {m.curso ? `${m.curso} ` : ""}{m.grao === "profesional" ? "G.P." : "G.E."}
-          </span>
-        </div>
+        <FilaAlumno key={m.id} m={m} abertaId={abertaId} onAbrirSwipe={setAbertaId} onAbrir={onAbrir} onEliminar={eliminarAlumno} />
       ))}
 
       <button className="fab" onClick={() => setMostrarForm(true)} aria-label="Engadir alumno">+</button>
@@ -1562,6 +1637,7 @@ function RepertorioXeral() {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [editando, setEditando] = useState(null);
   const [tiposOrdenando, setTiposOrdenando] = useState({});
+  const [abertaId, setAbertaId] = useState(null);
   function alternarOrdenar(tipo) { setTiposOrdenando(prev => ({ ...prev, [tipo]: !prev[tipo] })); }
 
   async function cargar() {
@@ -1635,7 +1711,8 @@ function RepertorioXeral() {
               )}
             </div>
             {agrupadas[tipo].map((o,i) => (
-              <div key={o.id} className="obra-row">
+              <FilaEliminable key={o.id} id={o.id} abertaId={abertaId} onAbrirSwipe={setAbertaId} onEliminar={()=>eliminar(o)}>
+              <div className="obra-row">
                 {tiposOrdenando[tipo] && (
                   <div className="reordenar">
                     <button type="button" title="Subir esta obra" onClick={()=>mover(o,agrupadas[tipo],-1)} disabled={i===0}>▲</button>
@@ -1656,8 +1733,8 @@ function RepertorioXeral() {
                   <a className="pdf-link" href={urlPdfRepertorio(o.pdf_path)} target="_blank" rel="noopener noreferrer">📄 PDF</a>
                 )}
                 <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: 12 }} onClick={()=>setEditando(o)}>Editar</button>
-                <button className="btn btn-danger" style={{ padding: "4px 8px", fontSize: 12 }} onClick={()=>eliminar(o)}>✕</button>
               </div>
+              </FilaEliminable>
             ))}
           </div>
         )
@@ -1684,6 +1761,7 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
   const [numerosEstudo, setNumerosEstudo] = useState("");
   const [textoLibre, setTextoLibre] = useState("");
   const [ordenando, setOrdenando] = useState(false);
+  const [abertaId, setAbertaId] = useState(null);
   const opcionsCatalogo = catalogo.filter(o => o.tipo === tipo);
   const libroSeleccionado = seleccionado ? opcionsCatalogo.find(o => o.id === seleccionado) : null;
   const esLibro = libroSeleccionado && libroSeleccionado.total_estudos;
@@ -1750,7 +1828,8 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
       {itens.map((item,i) => {
         const xeral = item.repertorio_xeral_id ? catalogo.find(o=>o.id===item.repertorio_xeral_id) : null;
         return (
-          <div key={item.id} className="obra-row">
+          <FilaEliminable key={item.id} id={item.id} abertaId={abertaId} onAbrirSwipe={setAbertaId} onEliminar={()=>quitar(item.id)}>
+          <div className="obra-row">
             {ordenando && (
               <div className="reordenar">
                 <button type="button" title="Subir esta obra" onClick={()=>mover(item,-1)} disabled={i===0}>▲</button>
@@ -1770,8 +1849,8 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
             <button className="btn btn-ghost" style={{ padding: "3px 8px", fontSize: 11.5 }} onClick={()=>alternarCompletada(item)}>
               {item.completada ? "Reabrir" : "Completada"}
             </button>
-            <button className="btn btn-danger" style={{ padding: "3px 8px", fontSize: 12 }} onClick={()=>quitar(item.id)}>✕</button>
           </div>
+          </FilaEliminable>
         );
       })}
 
