@@ -475,6 +475,36 @@ function asegurarEspazo(doc, y, necesario) {
   return y;
 }
 
+function exportarRepertorioTrimestrePDF(alumno, matricula, trimestreLabel, itensPorTipo) {
+  const doc = new window.jspdf.jsPDF();
+  cabeceiraPDF(doc, `Repertorio — ${trimestreLabel}`);
+  let y = 48;
+  doc.setFontSize(10); doc.setTextColor(10, 37, 64);
+  doc.setFont(undefined, "bold"); doc.text("Alumno:", 14, y);
+  doc.setFont(undefined, "normal"); doc.text(`${alumno.nome} ${alumno.apelidos || ""}`, 45, y); y += 7;
+  doc.setFont(undefined, "bold"); doc.text("Curso:", 14, y);
+  doc.setFont(undefined, "normal"); doc.text(`${matricula.curso || "-"} · ${matricula.curso_escolar}`, 45, y); y += 10;
+
+  TIPOS_REPERTORIO.forEach(tipo => {
+    const itens = itensPorTipo[tipo];
+    if (!itens || !itens.length) return;
+    y = asegurarEspazo(doc, y, 14);
+    doc.setFontSize(11.5); doc.setFont(undefined, "bold"); doc.setTextColor(13, 79, 139);
+    doc.text(tipo, 14, y); y += 7;
+    doc.setFontSize(10); doc.setFont(undefined, "normal"); doc.setTextColor(10, 37, 64);
+    itens.forEach(t => {
+      const lineas = doc.splitTextToSize(`• ${t}`, 178);
+      y = asegurarEspazo(doc, y, lineas.length * 5.5);
+      doc.text(lineas, 16, y); y += lineas.length * 5.5;
+    });
+    y += 3;
+  });
+
+  const nomeArquivo = `Repertorio_${trimestreLabel.replace(/\s+/g,"_")}_${(alumno.nome||"alumno").replace(/\s+/g,"_")}.pdf`;
+  doc.save(nomeArquivo);
+  return nomeArquivo;
+}
+
 function exportarClasePDF(alumno, fila, obrasSeleccionadas, pesos, opcions) {
   const doc = new window.jspdf.jsPDF();
   cabeceiraPDF(doc, "Rexistro de clase");
@@ -1043,7 +1073,8 @@ function FilaEliminable({ id, abertaId, onAbrirSwipe, onEliminar, children, clas
     <div className="swipe-wrap">
       <div className="swipe-borrar" style={{ width: ANCHO }} onClick={()=>onEliminar()}>Eliminar</div>
       <div className={className}
-        style={{ transform: `translateX(${offset}px)`, transition: arrastrando ? "none" : "transform .18s ease", touchAction: "pan-y" }}
+        style={{ transform: `translateX(${offset}px)`, transition: arrastrando ? "none" : "transform .18s ease",
+          touchAction: "pan-y", position: "relative", zIndex: 1, background: "#fff" }}
         onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={rematarArrastre} onPointerCancel={rematarArrastre}
         onClickCapture={clicCaptura}>
         {children}
@@ -1754,6 +1785,36 @@ function RepertorioXeral() {
   );
 }
 
+function HistorialObra({ titulo, matriculaId, repertorioAsignadoId, onClose }) {
+  const [sesions, setSesions] = useState(null);
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await sb.from("clases_repertorio")
+        .select("progreso, clases(data, trimestre)")
+        .eq("repertorio_asignado_id", repertorioAsignadoId)
+        .order("data", { foreignTable: "clases", ascending: true });
+      if (error) { alert(error.message); return; }
+      setSesions((data||[]).filter(s => s.clases));
+    })();
+  }, [repertorioAsignadoId]);
+
+  return (
+    <Modal title={`Historial — ${titulo}`} onClose={onClose}>
+      {sesions === null && <div className="empty">Cargando…</div>}
+      {sesions !== null && sesions.length === 0 && <div className="empty">Aínda non hai clases rexistradas con esta obra.</div>}
+      {sesions !== null && sesions.map((s,i) => (
+        <div key={i} className="titoria-item">
+          <strong>{formatarDataCurta(s.clases.data)}</strong>
+          {s.progreso && <div style={{ fontSize: 13.5, marginTop: 3 }}>{s.progreso}</div>}
+        </div>
+      ))}
+      <div className="row-actions">
+        <button className="btn" onClick={onClose}>Pechar</button>
+      </div>
+    </Modal>
+  );
+}
+
 function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, onCambio }) {
   const [mostrarAdd, setMostrarAdd] = useState(false);
   const [modo, setModo] = useState("catalogo");
@@ -1762,6 +1823,7 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
   const [textoLibre, setTextoLibre] = useState("");
   const [ordenando, setOrdenando] = useState(false);
   const [abertaId, setAbertaId] = useState(null);
+  const [historialAberto, setHistorialAberto] = useState(null);
   const opcionsCatalogo = catalogo.filter(o => o.tipo === tipo);
   const libroSeleccionado = seleccionado ? opcionsCatalogo.find(o => o.id === seleccionado) : null;
   const esLibro = libroSeleccionado && libroSeleccionado.total_estudos;
@@ -1846,6 +1908,9 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
             {xeral && xeral.pdf_path && (
               <a className="pdf-link" href={urlPdfRepertorio(xeral.pdf_path)} target="_blank" rel="noopener noreferrer">📄</a>
             )}
+            <button className="btn btn-ghost" style={{ padding: "3px 8px", fontSize: 11.5 }} onClick={()=>setHistorialAberto(item)}>
+              Historial
+            </button>
             <button className="btn btn-ghost" style={{ padding: "3px 8px", fontSize: 11.5 }} onClick={()=>alternarCompletada(item)}>
               {item.completada ? "Reabrir" : "Completada"}
             </button>
@@ -1888,6 +1953,16 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
       ) : (
         <button className="btn" style={{ marginTop: 10, fontSize: 12.5 }} onClick={()=>setMostrarAdd(true)}>+ Engadir obra</button>
       )}
+      {historialAberto && (
+        <HistorialObra
+          titulo={(() => {
+            const xeral = historialAberto.repertorio_xeral_id ? catalogo.find(o=>o.id===historialAberto.repertorio_xeral_id) : null;
+            return xeral ? `${xeral.titulo}${historialAberto.numero_estudo ? " Nº"+historialAberto.numero_estudo : ""}` : historialAberto.texto_libre;
+          })()}
+          matriculaId={matriculaId} repertorioAsignadoId={historialAberto.id}
+          onClose={()=>setHistorialAberto(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1897,10 +1972,11 @@ const TRIMESTRES_REPERTORIO = [
   { n: 3, label: "3º Trimestre" }, { n: 4, label: "Verán" },
 ];
 
-function TabRepertorio({ matriculaId }) {
+function TabRepertorio({ matriculaId, alumno, matricula }) {
   const [trimestre, setTrimestre] = useState(1);
   const [itens, setItens] = useState(null);
   const [catalogo, setCatalogo] = useState([]);
+  const [xerandoPdf, setXerandoPdf] = useState(false);
 
   async function cargar() {
     setItens(null);
@@ -1916,6 +1992,21 @@ function TabRepertorio({ matriculaId }) {
 
   if (itens === null) return <div className="empty">Cargando…</div>;
 
+  function xerarPdf() {
+    setXerandoPdf(true);
+    const trimestreLabel = TRIMESTRES_REPERTORIO.find(t=>t.n===trimestre).label;
+    const itensPorTipo = {};
+    TIPOS_REPERTORIO.forEach(tipo => {
+      itensPorTipo[tipo] = itens.filter(i=>i.tipo===tipo).map(item => {
+        const xeral = item.repertorio_xeral_id ? catalogo.find(o=>o.id===item.repertorio_xeral_id) : null;
+        return xeral ? `${xeral.titulo}${item.numero_estudo ? " Nº"+item.numero_estudo : ""}${xeral.autor ? " — "+xeral.autor : ""}` : item.texto_libre;
+      });
+    });
+    const ficheiro = exportarRepertorioTrimestrePDF(alumno, matricula, trimestreLabel, itensPorTipo);
+    abrirMailto(alumno, ficheiro, `Repertorio — ${trimestreLabel} — ${alumno.nome} ${alumno.apelidos||""}`);
+    setXerandoPdf(false);
+  }
+
   return (
     <div>
       <div className="tabs" style={{ position: "static", background: "transparent", borderBottom: "none", padding: 0, marginBottom: 10 }}>
@@ -1927,6 +2018,11 @@ function TabRepertorio({ matriculaId }) {
         <SeccionRepertorioTipo key={tipo} matriculaId={matriculaId} trimestre={trimestre} tipo={tipo}
           catalogo={catalogo} itens={itens.filter(i=>i.tipo===tipo)} onCambio={cargar} />
       ))}
+      {itens.length > 0 && (
+        <button className="btn btn-block" disabled={xerandoPdf} onClick={xerarPdf}>
+          {xerandoPdf ? "Xerando…" : "📄 PDF deste repertorio + Email"}
+        </button>
+      )}
     </div>
   );
 }
@@ -2712,7 +2808,7 @@ function FichaAlumno({ matricula, onVolver, onCambio }) {
       <div className="wrap">
         {tab === "ficha" && <TabFicha alumno={alumno} matricula={matricula} cualificacions={cualificacions||[]} materias={materias} onAtualizado={recargarAlumno} />}
         {tab === "materias" && <TabMaterias matriculaId={matricula.id} onCambio={recargarMaterias} />}
-        {tab === "repertorio" && <TabRepertorio matriculaId={matricula.id} />}
+        {tab === "repertorio" && <TabRepertorio matriculaId={matricula.id} alumno={alumno} matricula={matricula} />}
         <div style={{ display: tab === "clases" ? "block" : "none" }}>
           <TabClases matriculaId={matricula.id} grao={matricula.grao} alumno={alumno} matricula={matricula} />
         </div>
