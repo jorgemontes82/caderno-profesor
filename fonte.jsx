@@ -180,12 +180,17 @@ function exportarFichaPDF(alumno, matricula, cualificacions, materias) {
   };
   linea("Nome:", `${alumno.nome} ${alumno.apelidos || ""}`);
   linea("Expediente:", alumno.expediente);
-  linea("Curso:", `${matricula.curso || "-"} · Grao ${matricula.grao === "elemental" ? "Elemental" : "Profesional"}`);
+  linea("Curso:", `${matricula.curso || "-"} · ${labelGrao(matricula.grao)}`);
   (materias || []).forEach(m => {
-    linea(`Materia — ${m.nome}:`, `${m.profesor_titor || "-"} · ${textoHorarios(m.horarios)}`);
+    y = asegurarEspazo(doc, y, 20);
+    doc.setFont(undefined, "bold"); doc.text(m.nome, 14, y); y += 6;
+    doc.setFont(undefined, "normal");
+    linea("Titor:", m.profesor_titor);
+    linea("Horario:", textoHorarios(m.horarios));
     if (m.pianista_acompanante) linea("Pianista acompañante:", m.pianista_acompanante);
     const notas = [m.nota_1, m.nota_2, m.nota_3].map(n => n===null||n===undefined||n==="" ? "-" : fmt(Number(n)));
     linea("Notas (1ª/2ª/3ª):", notas.join(" · "));
+    y += 2;
   });
   linea("Data nacemento:", alumno.data_nacemento);
   linea("Dirección:", `${alumno.direccion || "-"} (${alumno.cp || "-"} ${alumno.poboacion || "-"})`);
@@ -279,7 +284,7 @@ function exportarRepertorioTrimestrePDF(alumno, matricula, trimestreLabel, itens
   doc.setFont(undefined, "bold"); doc.text("Alumno:", 14, y);
   doc.setFont(undefined, "normal"); doc.text(`${alumno.nome} ${alumno.apelidos || ""}`, 45, y); y += 7;
   doc.setFont(undefined, "bold"); doc.text("Curso:", 14, y);
-  doc.setFont(undefined, "normal"); doc.text(`${matricula.curso || "-"} · ${matricula.curso_escolar}`, 45, y); y += 10;
+  doc.setFont(undefined, "normal"); doc.text(`${matricula.curso || "-"} · ${labelGrao(matricula.grao)} · ${matricula.curso_escolar}`, 45, y); y += 10;
 
   TIPOS_REPERTORIO.forEach(tipo => {
     const itens = itensPorTipo[tipo];
@@ -324,11 +329,11 @@ function exportarClasePDF(alumno, fila, obrasSeleccionadas, pesos, opcions) {
     });
     y += 2;
   }
-  if (opcions.observacions && fila.observacions) {
+  if (opcions.inicioClase && fila.inicio_clase) {
     y = asegurarEspazo(doc, y, 14);
-    doc.setFontSize(11); doc.setFont(undefined, "bold"); doc.text("Observacións", 14, y); y += 7;
+    doc.setFontSize(11); doc.setFont(undefined, "bold"); doc.text("Inicio da clase", 14, y); y += 7;
     doc.setFontSize(10); doc.setFont(undefined, "normal");
-    const lineas = doc.splitTextToSize(fila.observacions, 180);
+    const lineas = doc.splitTextToSize(fila.inicio_clase, 180);
     y = asegurarEspazo(doc, y, lineas.length * 5);
     doc.text(lineas, 14, y); y += lineas.length * 5 + 6;
   }
@@ -388,7 +393,7 @@ function exportarInformeSustitutoPDF(anoEscolar, trimestre, detalles) {
     doc.text(`${d.alumno.nome} ${d.alumno.apelidos || ""}`, 14, y); y += 6;
 
     doc.setTextColor(10, 37, 64); doc.setFontSize(9.5); doc.setFont(undefined, "normal");
-    doc.text(`${d.curso || "-"} · Grao ${d.grao === "profesional" ? "Profesional" : "Elemental"} · Horario: ${textoHorarios(d.horario)}`, 14, y); y += 5;
+    doc.text(`${d.curso || "-"} · ${labelGrao(d.grao)} · Horario: ${textoHorarios(d.horario)}`, 14, y); y += 5;
 
     const contactos = [
       d.alumno.telefono_pai ? `Pai: ${d.alumno.telefono_pai}` : null,
@@ -481,7 +486,7 @@ function exportarResumoTrimestralPDF(alumno, matricula, trimestre, datos, opcion
   doc.setFont(undefined, "bold"); doc.text("Alumno:", 14, y);
   doc.setFont(undefined, "normal"); doc.text(`${alumno.nome} ${alumno.apelidos || ""}`, 45, y); y += 7;
   doc.setFont(undefined, "bold"); doc.text("Curso:", 14, y);
-  doc.setFont(undefined, "normal"); doc.text(`${matricula.curso || "-"} · ${matricula.curso_escolar}`, 45, y); y += 10;
+  doc.setFont(undefined, "normal"); doc.text(`${matricula.curso || "-"} · ${labelGrao(matricula.grao)} · ${matricula.curso_escolar}`, 45, y); y += 10;
 
   if (opcions.obraProgreso && datos.obrasAgrupadas.length) {
     y = asegurarEspazo(doc, y, 14);
@@ -498,10 +503,10 @@ function exportarResumoTrimestralPDF(alumno, matricula, trimestre, datos, opcion
       y += 4;
     });
   }
-  if (opcions.observacions && datos.observacionsPorData.length) {
+  if (opcions.inicioClase && datos.inicioClasePorData.length) {
     y = asegurarEspazo(doc, y, 14);
-    doc.setFontSize(12); doc.setFont(undefined, "bold"); doc.text("Observacións xerais", 14, y); y += 8;
-    datos.observacionsPorData.forEach(e => {
+    doc.setFontSize(12); doc.setFont(undefined, "bold"); doc.text("Inicio de clase", 14, y); y += 8;
+    datos.inicioClasePorData.forEach(e => {
       const lineas = doc.splitTextToSize(`${e.data}: ${e.texto}`, 178);
       y = asegurarEspazo(doc, y, lineas.length * 5);
       doc.setFontSize(9.5); doc.setFont(undefined, "normal");
@@ -1354,6 +1359,9 @@ function urlPdfRepertorio(path) {
   if (!path) return null;
   return sb.storage.from("repertorio").getPublicUrl(path).data.publicUrl;
 }
+function labelGrao(grao) {
+  return grao === "profesional" ? "Grao Profesional" : "Grao Elemental";
+}
 function tituloConNumero(titulo, numeroEstudo) {
   return numeroEstudo ? `${titulo} Nº${numeroEstudo}` : titulo;
 }
@@ -1530,10 +1538,12 @@ function exportarPianistaPDF(nomePianista, trimestreLabel, listaAlumnos) {
     y = asegurarEspazo(doc, y, 16);
     if (i > 0) { doc.setDrawColor(227,233,242); doc.line(14, y, 196, y); y += 8; }
     doc.setFontSize(11.5); doc.setFont(undefined, "bold"); doc.setTextColor(13, 79, 139);
-    doc.text(`${a.alumno.nome} ${a.alumno.apelidos||""}`, 14, y); y += 7;
-    doc.setFontSize(10); doc.setFont(undefined, "normal"); doc.setTextColor(10, 37, 64);
-    a.obras.forEach(t => {
-      const lineas = doc.splitTextToSize(`• ${t}`, 178);
+    doc.text(`${a.alumno.nome} ${a.alumno.apelidos||""}`, 14, y); y += 6;
+    doc.setFontSize(9); doc.setFont(undefined, "normal"); doc.setTextColor(90, 114, 144);
+    doc.text(`${a.curso || "-"} · ${labelGrao(a.grao)}`, 14, y); y += 7;
+    doc.setFontSize(10); doc.setTextColor(10, 37, 64);
+    a.obras.forEach(o => {
+      const lineas = doc.splitTextToSize(`• ${o.titulo}${o.autor ? " — " + o.autor : ""}`, 178);
       y = asegurarEspazo(doc, y, lineas.length*5.5);
       doc.text(lineas, 16, y); y += lineas.length*5.5;
     });
@@ -1555,7 +1565,7 @@ function PianistasXeral({ anoEscolar }) {
     setDatos(null);
     const { data: matriculas, error } = await sb
       .from("matriculas")
-      .select("id, alumnos(nome,apelidos,activo,email_alumno,email_pai,email_nai), materias(nome, pianista_acompanante)")
+      .select("id, curso, grao, alumnos(nome,apelidos,activo,email_alumno,email_pai,email_nai), materias(nome, pianista_acompanante)")
       .eq("curso_escolar", anoEscolar);
     if (error) { aviso(error.message, "erro"); return; }
     if (!matriculas.length) { setDatos({}); return; }
@@ -1564,7 +1574,7 @@ function PianistasXeral({ anoEscolar }) {
     matriculas.forEach(m => {
       if (!m.alumnos || m.alumnos.activo === false) return;
       const materiaViolin = (m.materias||[]).find(x=>(x.nome||"").toLowerCase().includes("violín")) || (m.materias||[])[0] || null;
-      infoMatricula[m.id] = { alumno: m.alumnos, pianista: materiaViolin?.pianista_acompanante || "" };
+      infoMatricula[m.id] = { alumno: m.alumnos, curso: m.curso, grao: m.grao, pianista: materiaViolin?.pianista_acompanante || "" };
     });
 
     const { data: obras, error: e2 } = await sb.from("repertorio_asignado")
@@ -1581,10 +1591,11 @@ function PianistasXeral({ anoEscolar }) {
       const nomePianista = info.pianista.trim() || "Sen pianista asignado";
       agrupado[nomePianista] = agrupado[nomePianista] || {};
       const chave = o.matricula_id;
-      agrupado[nomePianista][chave] = agrupado[nomePianista][chave] || { alumno: info.alumno, obras: [] };
+      agrupado[nomePianista][chave] = agrupado[nomePianista][chave] || { alumno: info.alumno, curso: info.curso, grao: info.grao, obras: [] };
       agrupado[nomePianista][chave].obras.push({
         id: o.id, entregada: o.entregada, para_ensaiar: o.para_ensaiar, avisado: o.avisado,
         titulo: tituloConNumero(o.repertorio_xeral?.titulo || o.texto_libre || "?", o.numero_estudo),
+        autor: o.repertorio_xeral?.autor || null,
       });
     });
     setDatos(agrupado);
@@ -1622,7 +1633,10 @@ function PianistasXeral({ anoEscolar }) {
   function xerarPdf() {
     setXerandoPdf(true);
     const trimestreLabel = TRIMESTRES_REPERTORIO.find(t=>t.n===trimestre).label;
-    exportarPianistaPDF(pianistaActivo, trimestreLabel, listaActiva.map(a => ({ alumno: a.alumno, obras: a.obras.map(o=>o.titulo) })));
+    exportarPianistaPDF(pianistaActivo, trimestreLabel, listaActiva.map(a => ({
+      alumno: a.alumno, curso: a.curso, grao: a.grao,
+      obras: a.obras.map(o=>({ titulo: o.titulo, autor: o.autor })),
+    })));
     setXerandoPdf(false);
   }
 
@@ -2312,11 +2326,11 @@ function TabRepertorio({ matriculaId, alumno, matricula }) {
 // TAB: Clases
 // ============================================================
 function SelectorOpcionsPDF({ titulo, onCancelar, onConfirmar, mostrarFaltas }) {
-  const [op, setOp] = useState({ obraProgreso: true, observacions: true, tarefas: true, notas: true, faltas: true });
+  const [op, setOp] = useState({ inicioClase: true, obraProgreso: true, tarefas: true, notas: true, faltas: true });
   const [xerando, setXerando] = useState(false);
   function toggle(k) { setOp(o => ({ ...o, [k]: !o[k] })); }
   const opcions = [
-    ["obraProgreso", "Obra / Progreso"], ["observacions", "Observacións"],
+    ["inicioClase", "Inicio da clase"], ["obraProgreso", "Obra / Progreso"],
     ["tarefas", "Tarefas"], ["notas", "Notas"],
   ];
   if (mostrarFaltas) opcions.push(["faltas", "Faltas"]);
@@ -2346,6 +2360,7 @@ function TarxetaClase({ fila, obrasDispoñibles, pesos, alumno, expandida, onExp
   const [data, setData] = useState(fila.data || "");
   const [falta, setFalta] = useState(fila.falta || false);
   const [motivoFalta, setMotivoFalta] = useState(fila.motivo_falta || "");
+  const [inicioClase, setInicioClase] = useState(fila.inicio_clase || "");
   const [observacions, setObservacions] = useState(fila.observacions || "");
   const [tarefas, setTarefas] = useState(fila.tarefas || "");
   const [criterios, setCriterios] = useState(() => {
@@ -2398,14 +2413,14 @@ function TarxetaClase({ fila, obrasDispoñibles, pesos, alumno, expandida, onExp
     setGardando(true);
     const notas = {};
     pesos.forEach(p => { notas[p.key] = criterios[p.key]; });
-    await gardarSeguro(sb.from("clases").update({ data, falta, motivo_falta: motivoFalta, observacions, tarefas, notas }).eq("id", fila.id), "clases");
+    await gardarSeguro(sb.from("clases").update({ data, falta, motivo_falta: motivoFalta, inicio_clase: inicioClase, observacions, tarefas, notas }).eq("id", fila.id), "clases");
     await Promise.all(obras.map(o => sb.from("clases_repertorio").update({ progreso: o.progreso }).eq("id", o.id)));
     setGardando(false);
     onGardado();
   }
 
   async function xerarPdf(opcions) {
-    const filaParaPdf = { ...criterios, data, observacions, tarefas };
+    const filaParaPdf = { ...criterios, data, inicio_clase: inicioClase, tarefas };
     const ficheiro = exportarClasePDF(alumno, filaParaPdf, obras, pesos, opcions);
     abrirMailto(alumno, ficheiro, `Clase do ${data} — ${alumno.nome} ${alumno.apelidos||""}`);
     setMostrarPdf(false);
@@ -2447,8 +2462,8 @@ function TarxetaClase({ fila, obrasDispoñibles, pesos, alumno, expandida, onExp
       ) : (
         <React.Fragment>
           <div className="clase-seccion">
-            <div className="clase-seccion-titulo">Observacións</div>
-            <textarea value={observacions} onChange={e=>setObservacions(e.target.value)} onBlur={()=>gardarCampo({ observacions })} style={{ minHeight: 70 }}></textarea>
+            <div className="clase-seccion-titulo">Inicio da clase</div>
+            <textarea value={inicioClase} onChange={e=>setInicioClase(e.target.value)} onBlur={()=>gardarCampo({ inicio_clase: inicioClase })} style={{ minHeight: 70 }}></textarea>
           </div>
 
           <div className="clase-seccion">
@@ -2494,6 +2509,11 @@ function TarxetaClase({ fila, obrasDispoñibles, pesos, alumno, expandida, onExp
           </div>
           {estado === "incompleta" && <div className="field-note" style={{ color: "var(--rojo)" }}>⚠ Faltan criterios por encher — este día non contará na media até que os completes todos.</div>}
           {estado === "completa" && <div className="field-note" style={{ color: "var(--verde)" }}>Media do día: {fmt(media)}</div>}
+
+          <div className="clase-seccion" style={{ borderLeftColor: "var(--sepia)", marginTop: 14 }}>
+            <div className="clase-seccion-titulo" style={{ color: "var(--sepia)" }}>Observacións (notas privadas — nunca se envían)</div>
+            <textarea value={observacions} onChange={e=>setObservacions(e.target.value)} onBlur={()=>gardarCampo({ observacions })} style={{ minHeight: 70 }}></textarea>
+          </div>
         </React.Fragment>
       )}
 
@@ -2570,7 +2590,7 @@ function TabClases({ matriculaId, grao, alumno, matricula }) {
       });
     });
     const obrasAgrupadas = Object.keys(obrasMapa).map(titulo => ({ titulo, entradas: obrasMapa[titulo] }));
-    const observacionsPorData = filas.filter(f=>!f.falta && f.observacions).map(f => ({ data: f.data, texto: f.observacions }));
+    const inicioClasePorData = filas.filter(f=>!f.falta && f.inicio_clase).map(f => ({ data: f.data, texto: f.inicio_clase }));
     const tarefasPorData = filas.filter(f=>!f.falta && f.tarefas).map(f => ({ data: f.data, texto: f.tarefas }));
     const faltas = filas.filter(f=>f.falta).map(f => ({ data: f.data, motivo: f.motivo_falta }));
 
@@ -2585,7 +2605,7 @@ function TabClases({ matriculaId, grao, alumno, matricula }) {
       ? { alternativa: true, final: mediaAlternativa(altData) }
       : { alternativa: false, clases: mClases, audicion: mAudi, hayAudicion, final: hayAudicion ? (mClases*0.7 + mAudi*0.3) : mClases };
 
-    const ficheiro = exportarResumoTrimestralPDF(alumno, matricula, trimestre, { obrasAgrupadas, observacionsPorData, tarefasPorData, cualificacion, faltas }, opcions);
+    const ficheiro = exportarResumoTrimestralPDF(alumno, matricula, trimestre, { obrasAgrupadas, inicioClasePorData, tarefasPorData, cualificacion, faltas }, opcions);
     abrirMailto(alumno, ficheiro, `Resumo ${trimestre}º trimestre — ${alumno.nome} ${alumno.apelidos||""}`);
     setMostrarPdfTrimestre(false);
   }
