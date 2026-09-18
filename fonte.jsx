@@ -457,19 +457,19 @@ async function xerarInformeSustitutoParaCurso(anoEscolar) {
     const [{ data: repertorio }, { data: clasesRecentes }] = await Promise.all([
       sb.from("repertorio_asignado").select("*, repertorio_xeral(titulo,autor)")
         .eq("matricula_id", m.id).eq("trimestre", trimestre).eq("completada", false).order("tipo"),
-      sb.from("clases").select("*, clases_repertorio(*, repertorio_asignado(texto_libre, numero_estudo, repertorio_xeral(titulo)))")
+      sb.from("clases").select("*, clases_repertorio(*, repertorio_asignado(texto_libre, numero_estudo, tipo, repertorio_xeral(titulo)))")
         .eq("matricula_id", m.id).eq("trimestre", trimestre).eq("falta", false)
         .order("data", { ascending: false }).limit(3),
     ]);
     return {
       alumno: m.alumnos, curso: m.curso, grao: m.grao, horario: m.horarioViolin,
       repertorio: (repertorio||[]).map(r => ({
-        tipo: r.tipo, titulo: tituloConNumero(r.repertorio_xeral?.titulo || r.texto_libre, r.numero_estudo), autor: r.repertorio_xeral?.autor,
+        tipo: r.tipo, titulo: tituloConNumero(r.repertorio_xeral?.titulo || r.texto_libre, r.numero_estudo, r.tipo), autor: r.repertorio_xeral?.autor,
       })),
       clasesRecentes: (clasesRecentes||[]).map(c => ({
         data: c.data, observacions: c.observacions,
         obras: (c.clases_repertorio||[]).map(cr => ({
-          titulo: tituloConNumero(cr.repertorio_asignado?.repertorio_xeral?.titulo || cr.repertorio_asignado?.texto_libre || "?", cr.repertorio_asignado?.numero_estudo),
+          titulo: tituloConNumero(cr.repertorio_asignado?.repertorio_xeral?.titulo || cr.repertorio_asignado?.texto_libre || "?", cr.repertorio_asignado?.numero_estudo, cr.repertorio_asignado?.tipo),
           progreso: cr.progreso,
         })),
       })),
@@ -1022,20 +1022,23 @@ function FotoAlumno({ alumno, onAtualizado }) {
 
 function TabFicha({ alumno, matricula, cualificacions, materias, onAtualizado }) {
   const [editando, setEditando] = useState(false);
-  const [f, setF] = useState(alumno);
-  useEffect(() => setF(alumno), [alumno]);
+  const [f, setF] = useState(() => ({ ...alumno, curso: matricula.curso, grao: matricula.grao }));
+  useEffect(() => setF({ ...alumno, curso: matricula.curso, grao: matricula.grao }), [alumno, matricula]);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
   async function gardar() {
-    const { error } = await sb.from("alumnos").update({
+    const ok1 = await gardarSeguro(sb.from("alumnos").update({
       nome: f.nome, apelidos: f.apelidos, expediente: f.expediente,
       data_nacemento: f.data_nacemento || null, direccion: f.direccion, cp: f.cp, poboacion: f.poboacion,
       telefono_alumno: f.telefono_alumno, telefono_pai: f.telefono_pai, telefono_nai: f.telefono_nai,
       email_alumno: f.email_alumno, nome_pai: f.nome_pai, email_pai: f.email_pai,
       nome_nai: f.nome_nai, email_nai: f.email_nai,
       observacions: f.observacions,
-    }).eq("id", alumno.id);
-    if (error) { aviso("Erro: " + error.message, "erro"); return; }
+    }).eq("id", alumno.id), "alumno");
+    const ok2 = await gardarSeguro(sb.from("matriculas").update({
+      curso: f.curso, grao: f.grao,
+    }).eq("id", matricula.id), "matrícula");
+    if (!ok1 || !ok2) return;
     setEditando(false);
     onAtualizado();
   }
@@ -1043,6 +1046,16 @@ function TabFicha({ alumno, matricula, cualificacions, materias, onAtualizado })
   if (editando) {
     return (
       <div className="card">
+        <div className="grid2">
+          <Campo label="Curso (p.ex. 3º)" value={f.curso||""} onChange={set("curso")} />
+          <div>
+            <label>Grao</label>
+            <select className="field" value={f.grao||"elemental"} onChange={set("grao")}>
+              <option value="elemental">Elemental (GE)</option>
+              <option value="profesional">Profesional (GP)</option>
+            </select>
+          </div>
+        </div>
         <div className="grid2">
           <Campo label="Nome" value={f.nome||""} onChange={set("nome")} />
           <Campo label="Apelidos" value={f.apelidos||""} onChange={set("apelidos")} />
@@ -1073,7 +1086,7 @@ function TabFicha({ alumno, matricula, cualificacions, materias, onAtualizado })
         <label>Observacións</label>
         <textarea value={f.observacions||""} onChange={set("observacions")}></textarea>
         <div className="row-actions">
-          <button className="btn" onClick={() => { setEditando(false); setF(alumno); }}>Cancelar</button>
+          <button className="btn" onClick={() => { setEditando(false); setF({ ...alumno, curso: matricula.curso, grao: matricula.grao }); }}>Cancelar</button>
           <button className="btn btn-primary" onClick={gardar}>Gardar cambios</button>
         </div>
       </div>
@@ -1362,8 +1375,11 @@ function urlPdfRepertorio(path) {
 function labelGrao(grao) {
   return grao === "profesional" ? "Grao Profesional" : "Grao Elemental";
 }
-function tituloConNumero(titulo, numeroEstudo) {
-  return numeroEstudo ? `${titulo} Nº${numeroEstudo}` : titulo;
+const TIPOS_MOVEMENTO = ["Concertos", "Sonatas", "Pezas"];
+function tituloConNumero(titulo, numeroEstudo, tipo) {
+  if (!numeroEstudo) return titulo;
+  if (tipo && TIPOS_MOVEMENTO.includes(tipo)) return `${titulo} — ${numeroEstudo}º movemento`;
+  return `${titulo} Nº${numeroEstudo}`;
 }
 
 function TagInput({ valores, onChange, placeholder }) {
@@ -1473,13 +1489,17 @@ function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
           </datalist>
           <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14 }}>
             <input type="checkbox" checked={esColeccion} onChange={e=>setEsColeccion(e.target.checked)} style={{ width: 18, height: 18 }} />
-            É unha colección numerada (ex. 42 estudos)
+            {TIPOS_MOVEMENTO.includes(tipoRapido) ? "Ten varios movementos" : "É unha colección numerada (ex. 42 estudos)"}
           </label>
           {esColeccion && (
             <div style={{ marginTop: 8 }}>
-              <label>Cantos números ten</label>
+              <label>{TIPOS_MOVEMENTO.includes(tipoRapido) ? "Cantos movementos ten" : "Cantos números ten"}</label>
               <input type="text" inputMode="numeric" value={totalRapido} onChange={e=>setTotalRapido(e.target.value)} required={esColeccion} />
-              <div className="field-note">Despois, ao asignarllo a un alumno, eliges que número concreto traballa.</div>
+              <div className="field-note">
+                {TIPOS_MOVEMENTO.includes(tipoRapido)
+                  ? "Despois, ao asignarllo a un alumno, eliges que movemento(s) concreto(s) traballa."
+                  : "Despois, ao asignarllo a un alumno, eliges que número concreto traballa."}
+              </div>
             </div>
           )}
           <div className="row-actions">
@@ -1510,7 +1530,7 @@ function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
         <datalist id="autores-suxeridos">
           {autoresSuxeridos.map(a => <option key={a} value={a} />)}
         </datalist>
-        <Campo label="Total de estudos (se é un libro/colección)" type="text" inputMode="numeric" value={f.total_estudos} onChange={e=>setF({...f,total_estudos:e.target.value})} />
+        <Campo label="Total de estudos/movementos (se é un libro, colección ou obra con varios movementos)" type="text" inputMode="numeric" value={f.total_estudos} onChange={e=>setF({...f,total_estudos:e.target.value})} />
         <label>Niveis</label>
         <TagInput valores={f.niveis} onChange={v=>setF({...f,niveis:v})} placeholder="p.ex. 2º GE" />
         <label>Observacións</label>
@@ -1594,7 +1614,7 @@ function PianistasXeral({ anoEscolar }) {
       agrupado[nomePianista][chave] = agrupado[nomePianista][chave] || { alumno: info.alumno, curso: info.curso, grao: info.grao, obras: [] };
       agrupado[nomePianista][chave].obras.push({
         id: o.id, entregada: o.entregada, para_ensaiar: o.para_ensaiar, avisado: o.avisado,
-        titulo: tituloConNumero(o.repertorio_xeral?.titulo || o.texto_libre || "?", o.numero_estudo),
+        titulo: tituloConNumero(o.repertorio_xeral?.titulo || o.texto_libre || "?", o.numero_estudo, o.tipo),
         autor: o.repertorio_xeral?.autor || null,
       });
     });
@@ -1672,7 +1692,7 @@ function PianistasXeral({ anoEscolar }) {
               </div>
               {a.obras.map(o => (
                 <div key={o.id} style={{ padding: "6px 0", borderBottom: "1px solid var(--crema)" }}>
-                  <div style={{ fontSize: 13.5, marginBottom: 4 }}>{o.titulo}</div>
+                  <div style={{ fontSize: 13.5, marginBottom: 4 }}>{o.titulo}{o.autor ? ` — ${o.autor}` : ""}</div>
                   <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
                     <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--sepia)" }}>
                       <input type="checkbox" checked={o.entregada} onChange={()=>alternarEntregada(o)} style={{ width: 16, height: 16 }} />
@@ -1762,7 +1782,7 @@ function DetalleEventoAudicion({ evento, onClose, onCambio }) {
 
   async function cargar() {
     const { data: audicions, error } = await sb.from("audicions")
-      .select("id, matricula_id, matriculas(alumnos(nome,apelidos), materias(nome,horarios_materia(dia_semana,hora))), audicions_repertorio(id, repertorio_asignado(texto_libre, numero_estudo, repertorio_xeral(titulo)))")
+      .select("id, matricula_id, matriculas(alumnos(nome,apelidos), materias(nome,horarios_materia(dia_semana,hora))), audicions_repertorio(id, repertorio_asignado(texto_libre, numero_estudo, tipo, repertorio_xeral(titulo)))")
       .eq("evento_audicion_id", evento.id);
     if (error) { aviso(error.message, "erro"); return; }
 
@@ -1777,7 +1797,7 @@ function DetalleEventoAudicion({ evento, onClose, onCambio }) {
         id: a.id, alumno: a.matriculas?.alumnos, sesions,
         obras: (a.audicions_repertorio||[]).map(ar => ({
           id: ar.id,
-          titulo: tituloConNumero(ar.repertorio_asignado?.repertorio_xeral?.titulo || ar.repertorio_asignado?.texto_libre || "?", ar.repertorio_asignado?.numero_estudo),
+          titulo: tituloConNumero(ar.repertorio_asignado?.repertorio_xeral?.titulo || ar.repertorio_asignado?.texto_libre || "?", ar.repertorio_asignado?.numero_estudo, ar.repertorio_asignado?.tipo),
         })),
       };
     }));
@@ -2226,14 +2246,18 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
                 <option value="">— Selecciona unha obra —</option>
                 {opcionsCatalogo.map(o => (
                   <option key={o.id} value={o.id}>
-                    {o.titulo}{o.autor ? ` — ${o.autor}` : ""}{o.total_estudos ? ` (${o.total_estudos} estudos)` : ""}
+                    {o.titulo}{o.autor ? ` — ${o.autor}` : ""}{o.total_estudos ? (TIPOS_MOVEMENTO.includes(tipo) ? ` (${o.total_estudos} movementos)` : ` (${o.total_estudos} estudos)`) : ""}
                   </option>
                 ))}
               </select>
               {esLibro && (
                 <div style={{ marginTop: 8 }}>
-                  <label>Número(s) de estudo (1–{esLibro}) — pode ser máis dun, separados por coma</label>
-                  <input type="text" placeholder="p.ex. 12, 15, 20" value={numerosEstudo} onChange={e=>setNumerosEstudo(e.target.value)} />
+                  <label>
+                    {TIPOS_MOVEMENTO.includes(tipo)
+                      ? `Movemento(s) (1–${esLibro}) — pode ser máis dun, separados por coma`
+                      : `Número(s) de estudo (1–${esLibro}) — pode ser máis dun, separados por coma`}
+                  </label>
+                  <input type="text" placeholder={TIPOS_MOVEMENTO.includes(tipo) ? "p.ex. 1, 2" : "p.ex. 12, 15, 20"} value={numerosEstudo} onChange={e=>setNumerosEstudo(e.target.value)} />
                 </div>
               )}
             </React.Fragment>
@@ -2497,6 +2521,11 @@ function TarxetaClase({ fila, obrasDispoñibles, pesos, alumno, expandida, onExp
             <textarea value={tarefas} onChange={e=>setTarefas(e.target.value)} onBlur={()=>gardarCampo({ tarefas })} style={{ minHeight: 70 }}></textarea>
           </div>
 
+          <div className="clase-seccion" style={{ borderLeftColor: "var(--sepia)" }}>
+            <div className="clase-seccion-titulo" style={{ color: "var(--sepia)" }}>Observacións (notas privadas — nunca se envían)</div>
+            <textarea value={observacions} onChange={e=>setObservacions(e.target.value)} onBlur={()=>gardarCampo({ observacions })} style={{ minHeight: 70 }}></textarea>
+          </div>
+
           <label>Criterios de avaliación</label>
           <div className="grid2">
             {pesos.map(p => (
@@ -2509,11 +2538,6 @@ function TarxetaClase({ fila, obrasDispoñibles, pesos, alumno, expandida, onExp
           </div>
           {estado === "incompleta" && <div className="field-note" style={{ color: "var(--rojo)" }}>⚠ Faltan criterios por encher — este día non contará na media até que os completes todos.</div>}
           {estado === "completa" && <div className="field-note" style={{ color: "var(--verde)" }}>Media do día: {fmt(media)}</div>}
-
-          <div className="clase-seccion" style={{ borderLeftColor: "var(--sepia)", marginTop: 14 }}>
-            <div className="clase-seccion-titulo" style={{ color: "var(--sepia)" }}>Observacións (notas privadas — nunca se envían)</div>
-            <textarea value={observacions} onChange={e=>setObservacions(e.target.value)} onBlur={()=>gardarCampo({ observacions })} style={{ minHeight: 70 }}></textarea>
-          </div>
         </React.Fragment>
       )}
 
@@ -2542,7 +2566,7 @@ function TabClases({ matriculaId, grao, alumno, matricula }) {
     setFilas(null);
     const [{ data: clasesData, error }, { data: asignadoData }] = await Promise.all([
       sb.from("clases")
-        .select("*, clases_repertorio(*, repertorio_asignado(id, texto_libre, numero_estudo, repertorio_xeral(titulo,autor)))")
+        .select("*, clases_repertorio(*, repertorio_asignado(id, texto_libre, numero_estudo, tipo, repertorio_xeral(titulo,autor)))")
         .eq("matricula_id", matriculaId).eq("trimestre", trimestre)
         .order("data", { ascending: true })
         .order("created_at", { foreignTable: "clases_repertorio", ascending: true }),
@@ -2555,13 +2579,13 @@ function TabClases({ matriculaId, grao, alumno, matricula }) {
       ...c, ...(c.notas || {}),
       obras: (c.clases_repertorio||[]).map(cr => ({
         id: cr.id, repertorio_asignado_id: cr.repertorio_asignado_id, progreso: cr.progreso || "",
-        titulo: tituloConNumero(cr.repertorio_asignado?.repertorio_xeral?.titulo || cr.repertorio_asignado?.texto_libre || "(obra eliminada)", cr.repertorio_asignado?.numero_estudo),
+        titulo: tituloConNumero(cr.repertorio_asignado?.repertorio_xeral?.titulo || cr.repertorio_asignado?.texto_libre || "(obra eliminada)", cr.repertorio_asignado?.numero_estudo, cr.repertorio_asignado?.tipo),
         autor: cr.repertorio_asignado?.repertorio_xeral?.autor || null,
       })),
     }));
     setFilas(procesadas);
     setObrasAsignadas((asignadoData||[]).map(a => ({
-      id: a.id, titulo: tituloConNumero(a.repertorio_xeral?.titulo || a.texto_libre || "?", a.numero_estudo), autor: a.repertorio_xeral?.autor || null,
+      id: a.id, titulo: tituloConNumero(a.repertorio_xeral?.titulo || a.texto_libre || "?", a.numero_estudo, a.tipo), autor: a.repertorio_xeral?.autor || null,
     })));
     if (idParaAbrir !== undefined) {
       setExpandidaId(idParaAbrir);
@@ -2809,7 +2833,7 @@ function TabAudicions({ matriculaId }) {
   async function cargar() {
     setFilas(null);
     const [{ data: audiData, error }, { data: asignadoData }] = await Promise.all([
-      sb.from("audicions").select("*, audicions_repertorio(*, repertorio_asignado(texto_libre, numero_estudo, repertorio_xeral(titulo)))")
+      sb.from("audicions").select("*, audicions_repertorio(*, repertorio_asignado(texto_libre, numero_estudo, tipo, repertorio_xeral(titulo)))")
         .eq("matricula_id", matriculaId).eq("trimestre", trimestre).order("data", { ascending: true }),
       sb.from("repertorio_asignado").select("*, repertorio_xeral(titulo,autor)")
         .eq("matricula_id", matriculaId).eq("trimestre", trimestre).eq("completada", false).order("tipo"),
@@ -2819,12 +2843,12 @@ function TabAudicions({ matriculaId }) {
       ...a,
       obras: (a.audicions_repertorio||[]).map(ar => ({
         id: ar.id, repertorio_asignado_id: ar.repertorio_asignado_id,
-        titulo: tituloConNumero(ar.repertorio_asignado?.repertorio_xeral?.titulo || ar.repertorio_asignado?.texto_libre || "?", ar.repertorio_asignado?.numero_estudo),
+        titulo: tituloConNumero(ar.repertorio_asignado?.repertorio_xeral?.titulo || ar.repertorio_asignado?.texto_libre || "?", ar.repertorio_asignado?.numero_estudo, ar.repertorio_asignado?.tipo),
       })),
     }));
     setFilas(procesadas);
     setObrasAsignadas((asignadoData||[]).map(a => ({
-      id: a.id, titulo: tituloConNumero(a.repertorio_xeral?.titulo || a.texto_libre || "?", a.numero_estudo), autor: a.repertorio_xeral?.autor || null,
+      id: a.id, titulo: tituloConNumero(a.repertorio_xeral?.titulo || a.texto_libre || "?", a.numero_estudo, a.tipo), autor: a.repertorio_xeral?.autor || null,
     })));
   }
   useEffect(() => { cargar(); }, [matriculaId, trimestre]);
@@ -3085,17 +3109,22 @@ function TabTitorias({ matriculaId, alumno }) {
 // ============================================================
 // FICHA DE ALUMNO (contedor de tabs)
 // ============================================================
-function FichaAlumno({ matricula, onVolver, onCambio }) {
+function FichaAlumno({ matricula: matriculaInicial, onVolver, onCambio }) {
   const [tab, setTab] = useState("ficha");
   const [subClases, setSubClases] = useState("clases");
   const [subAval, setSubAval] = useState("audicions");
-  const [alumno, setAlumno] = useState(matricula.alumnos);
+  const [alumno, setAlumno] = useState(matriculaInicial.alumnos);
+  const [matricula, setMatricula] = useState(matriculaInicial);
   const [materias, setMaterias] = useState([]);
   const cualificacions = useCualificacions(matricula.id, matricula.grao);
 
   async function recargarAlumno() {
-    const { data } = await sb.from("alumnos").select("*").eq("id", matricula.alumno_id).single();
-    if (data) setAlumno(data);
+    const [{ data: dAlumno }, { data: dMatricula }] = await Promise.all([
+      sb.from("alumnos").select("*").eq("id", matricula.alumno_id).single(),
+      sb.from("matriculas").select("*").eq("id", matricula.id).single(),
+    ]);
+    if (dAlumno) setAlumno(dAlumno);
+    if (dMatricula) setMatricula(m => ({ ...m, ...dMatricula }));
   }
   async function recargarMaterias() {
     const { data } = await sb.from("materias").select("*, horarios_materia(*)").eq("matricula_id", matricula.id);

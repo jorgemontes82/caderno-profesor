@@ -799,7 +799,7 @@ async function xerarInformeSustitutoParaCurso(anoEscolar) {
         const [{ data: repertorio }, { data: clasesRecentes }] = await Promise.all([
             sb.from("repertorio_asignado").select("*, repertorio_xeral(titulo,autor)")
                 .eq("matricula_id", m.id).eq("trimestre", trimestre).eq("completada", false).order("tipo"),
-            sb.from("clases").select("*, clases_repertorio(*, repertorio_asignado(texto_libre, numero_estudo, repertorio_xeral(titulo)))")
+            sb.from("clases").select("*, clases_repertorio(*, repertorio_asignado(texto_libre, numero_estudo, tipo, repertorio_xeral(titulo)))")
                 .eq("matricula_id", m.id).eq("trimestre", trimestre).eq("falta", false)
                 .order("data", { ascending: false }).limit(3),
         ]);
@@ -808,15 +808,15 @@ async function xerarInformeSustitutoParaCurso(anoEscolar) {
             repertorio: (repertorio || []).map(r => {
                 var _a, _b;
                 return ({
-                    tipo: r.tipo, titulo: tituloConNumero(((_a = r.repertorio_xeral) === null || _a === void 0 ? void 0 : _a.titulo) || r.texto_libre, r.numero_estudo), autor: (_b = r.repertorio_xeral) === null || _b === void 0 ? void 0 : _b.autor,
+                    tipo: r.tipo, titulo: tituloConNumero(((_a = r.repertorio_xeral) === null || _a === void 0 ? void 0 : _a.titulo) || r.texto_libre, r.numero_estudo, r.tipo), autor: (_b = r.repertorio_xeral) === null || _b === void 0 ? void 0 : _b.autor,
                 });
             }),
             clasesRecentes: (clasesRecentes || []).map(c => ({
                 data: c.data, observacions: c.observacions,
                 obras: (c.clases_repertorio || []).map(cr => {
-                    var _a, _b, _c, _d;
+                    var _a, _b, _c, _d, _f;
                     return ({
-                        titulo: tituloConNumero(((_b = (_a = cr.repertorio_asignado) === null || _a === void 0 ? void 0 : _a.repertorio_xeral) === null || _b === void 0 ? void 0 : _b.titulo) || ((_c = cr.repertorio_asignado) === null || _c === void 0 ? void 0 : _c.texto_libre) || "?", (_d = cr.repertorio_asignado) === null || _d === void 0 ? void 0 : _d.numero_estudo),
+                        titulo: tituloConNumero(((_b = (_a = cr.repertorio_asignado) === null || _a === void 0 ? void 0 : _a.repertorio_xeral) === null || _b === void 0 ? void 0 : _b.titulo) || ((_c = cr.repertorio_asignado) === null || _c === void 0 ? void 0 : _c.texto_libre) || "?", (_d = cr.repertorio_asignado) === null || _d === void 0 ? void 0 : _d.numero_estudo, (_f = cr.repertorio_asignado) === null || _f === void 0 ? void 0 : _f.tipo),
                         progreso: cr.progreso,
                     });
                 }),
@@ -1372,27 +1372,35 @@ function FotoAlumno({ alumno, onAtualizado }) {
 }
 function TabFicha({ alumno, matricula, cualificacions, materias, onAtualizado }) {
     const [editando, setEditando] = useState(false);
-    const [f, setF] = useState(alumno);
-    useEffect(() => setF(alumno), [alumno]);
+    const [f, setF] = useState(() => (Object.assign(Object.assign({}, alumno), { curso: matricula.curso, grao: matricula.grao })));
+    useEffect(() => setF(Object.assign(Object.assign({}, alumno), { curso: matricula.curso, grao: matricula.grao })), [alumno, matricula]);
     const set = (k) => (e) => setF(Object.assign(Object.assign({}, f), { [k]: e.target.value }));
     async function gardar() {
-        const { error } = await sb.from("alumnos").update({
+        const ok1 = await gardarSeguro(sb.from("alumnos").update({
             nome: f.nome, apelidos: f.apelidos, expediente: f.expediente,
             data_nacemento: f.data_nacemento || null, direccion: f.direccion, cp: f.cp, poboacion: f.poboacion,
             telefono_alumno: f.telefono_alumno, telefono_pai: f.telefono_pai, telefono_nai: f.telefono_nai,
             email_alumno: f.email_alumno, nome_pai: f.nome_pai, email_pai: f.email_pai,
             nome_nai: f.nome_nai, email_nai: f.email_nai,
             observacions: f.observacions,
-        }).eq("id", alumno.id);
-        if (error) {
-            aviso("Erro: " + error.message, "erro");
+        }).eq("id", alumno.id), "alumno");
+        const ok2 = await gardarSeguro(sb.from("matriculas").update({
+            curso: f.curso, grao: f.grao,
+        }).eq("id", matricula.id), "matrícula");
+        if (!ok1 || !ok2)
             return;
-        }
         setEditando(false);
         onAtualizado();
     }
     if (editando) {
         return (React.createElement("div", { className: "card" },
+            React.createElement("div", { className: "grid2" },
+                React.createElement(Campo, { label: "Curso (p.ex. 3\u00BA)", value: f.curso || "", onChange: set("curso") }),
+                React.createElement("div", null,
+                    React.createElement("label", null, "Grao"),
+                    React.createElement("select", { className: "field", value: f.grao || "elemental", onChange: set("grao") },
+                        React.createElement("option", { value: "elemental" }, "Elemental (GE)"),
+                        React.createElement("option", { value: "profesional" }, "Profesional (GP)")))),
             React.createElement("div", { className: "grid2" },
                 React.createElement(Campo, { label: "Nome", value: f.nome || "", onChange: set("nome") }),
                 React.createElement(Campo, { label: "Apelidos", value: f.apelidos || "", onChange: set("apelidos") })),
@@ -1418,7 +1426,7 @@ function TabFicha({ alumno, matricula, cualificacions, materias, onAtualizado })
             React.createElement("label", null, "Observaci\u00F3ns"),
             React.createElement("textarea", { value: f.observacions || "", onChange: set("observacions") }),
             React.createElement("div", { className: "row-actions" },
-                React.createElement("button", { className: "btn", onClick: () => { setEditando(false); setF(alumno); } }, "Cancelar"),
+                React.createElement("button", { className: "btn", onClick: () => { setEditando(false); setF(Object.assign(Object.assign({}, alumno), { curso: matricula.curso, grao: matricula.grao })); } }, "Cancelar"),
                 React.createElement("button", { className: "btn btn-primary", onClick: gardar }, "Gardar cambios"))));
     }
     const Linea = ({ label, valor }) => (React.createElement("div", { style: { display: "flex", padding: "6px 0", borderBottom: "1px solid var(--crema)", fontSize: 14 } },
@@ -1651,8 +1659,13 @@ function urlPdfRepertorio(path) {
 function labelGrao(grao) {
     return grao === "profesional" ? "Grao Profesional" : "Grao Elemental";
 }
-function tituloConNumero(titulo, numeroEstudo) {
-    return numeroEstudo ? `${titulo} Nº${numeroEstudo}` : titulo;
+const TIPOS_MOVEMENTO = ["Concertos", "Sonatas", "Pezas"];
+function tituloConNumero(titulo, numeroEstudo, tipo) {
+    if (!numeroEstudo)
+        return titulo;
+    if (tipo && TIPOS_MOVEMENTO.includes(tipo))
+        return `${titulo} — ${numeroEstudo}º movemento`;
+    return `${titulo} Nº${numeroEstudo}`;
 }
 function TagInput({ valores, onChange, placeholder }) {
     const [texto, setTexto] = useState("");
@@ -1767,11 +1780,13 @@ function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
                 React.createElement("datalist", { id: "autores-suxeridos" }, autoresSuxeridos.map(a => React.createElement("option", { key: a, value: a }))),
                 React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 8, marginTop: 14 } },
                     React.createElement("input", { type: "checkbox", checked: esColeccion, onChange: e => setEsColeccion(e.target.checked), style: { width: 18, height: 18 } }),
-                    "\u00C9 unha colecci\u00F3n numerada (ex. 42 estudos)"),
+                    TIPOS_MOVEMENTO.includes(tipoRapido) ? "Ten varios movementos" : "É unha colección numerada (ex. 42 estudos)"),
                 esColeccion && (React.createElement("div", { style: { marginTop: 8 } },
-                    React.createElement("label", null, "Cantos n\u00FAmeros ten"),
+                    React.createElement("label", null, TIPOS_MOVEMENTO.includes(tipoRapido) ? "Cantos movementos ten" : "Cantos números ten"),
                     React.createElement("input", { type: "text", inputMode: "numeric", value: totalRapido, onChange: e => setTotalRapido(e.target.value), required: esColeccion }),
-                    React.createElement("div", { className: "field-note" }, "Despois, ao asignarllo a un alumno, eliges que n\u00FAmero concreto traballa."))),
+                    React.createElement("div", { className: "field-note" }, TIPOS_MOVEMENTO.includes(tipoRapido)
+                        ? "Despois, ao asignarllo a un alumno, eliges que movemento(s) concreto(s) traballa."
+                        : "Despois, ao asignarllo a un alumno, eliges que número concreto traballa."))),
                 React.createElement("div", { className: "row-actions" },
                     React.createElement("button", { type: "button", className: "btn", onClick: onClose }, "Rematar"),
                     React.createElement("button", { type: "button", className: "btn btn-ghost", onClick: () => setModo("normal") }, "Formulario completo"),
@@ -1786,7 +1801,7 @@ function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
             React.createElement("label", null, "Autor"),
             React.createElement("input", { type: "text", list: "autores-suxeridos", value: f.autor, onChange: e => setF(Object.assign(Object.assign({}, f), { autor: e.target.value })) }),
             React.createElement("datalist", { id: "autores-suxeridos" }, autoresSuxeridos.map(a => React.createElement("option", { key: a, value: a }))),
-            React.createElement(Campo, { label: "Total de estudos (se \u00E9 un libro/colecci\u00F3n)", type: "text", inputMode: "numeric", value: f.total_estudos, onChange: e => setF(Object.assign(Object.assign({}, f), { total_estudos: e.target.value })) }),
+            React.createElement(Campo, { label: "Total de estudos/movementos (se \u00E9 un libro, colecci\u00F3n ou obra con varios movementos)", type: "text", inputMode: "numeric", value: f.total_estudos, onChange: e => setF(Object.assign(Object.assign({}, f), { total_estudos: e.target.value })) }),
             React.createElement("label", null, "Niveis"),
             React.createElement(TagInput, { valores: f.niveis, onChange: v => setF(Object.assign(Object.assign({}, f), { niveis: v })), placeholder: "p.ex. 2\u00BA GE" }),
             React.createElement("label", null, "Observaci\u00F3ns"),
@@ -1886,7 +1901,7 @@ function PianistasXeral({ anoEscolar }) {
             agrupado[nomePianista][chave] = agrupado[nomePianista][chave] || { alumno: info.alumno, curso: info.curso, grao: info.grao, obras: [] };
             agrupado[nomePianista][chave].obras.push({
                 id: o.id, entregada: o.entregada, para_ensaiar: o.para_ensaiar, avisado: o.avisado,
-                titulo: tituloConNumero(((_a = o.repertorio_xeral) === null || _a === void 0 ? void 0 : _a.titulo) || o.texto_libre || "?", o.numero_estudo),
+                titulo: tituloConNumero(((_a = o.repertorio_xeral) === null || _a === void 0 ? void 0 : _a.titulo) || o.texto_libre || "?", o.numero_estudo, o.tipo),
                 autor: ((_b = o.repertorio_xeral) === null || _b === void 0 ? void 0 : _b.autor) || null,
             });
         });
@@ -1948,7 +1963,9 @@ function PianistasXeral({ anoEscolar }) {
                         a.alumno.apelidos),
                     React.createElement("button", { className: "btn btn-ghost", style: { fontSize: 11.5, padding: "4px 8px" }, onClick: () => avisarAlumno(a.alumno, a.obras) }, "\u2709\uFE0F Avisar alumno")),
                 a.obras.map(o => (React.createElement("div", { key: o.id, style: { padding: "6px 0", borderBottom: "1px solid var(--crema)" } },
-                    React.createElement("div", { style: { fontSize: 13.5, marginBottom: 4 } }, o.titulo),
+                    React.createElement("div", { style: { fontSize: 13.5, marginBottom: 4 } },
+                        o.titulo,
+                        o.autor ? ` — ${o.autor}` : ""),
                     React.createElement("div", { style: { display: "flex", gap: 14, flexWrap: "wrap" } },
                         React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--sepia)" } },
                             React.createElement("input", { type: "checkbox", checked: o.entregada, onChange: () => alternarEntregada(o), style: { width: 16, height: 16 } }),
@@ -2024,7 +2041,7 @@ function DetalleEventoAudicion({ evento, onClose, onCambio }) {
     const [filas, setFilas] = useState(null);
     async function cargar() {
         const { data: audicions, error } = await sb.from("audicions")
-            .select("id, matricula_id, matriculas(alumnos(nome,apelidos), materias(nome,horarios_materia(dia_semana,hora))), audicions_repertorio(id, repertorio_asignado(texto_libre, numero_estudo, repertorio_xeral(titulo)))")
+            .select("id, matricula_id, matriculas(alumnos(nome,apelidos), materias(nome,horarios_materia(dia_semana,hora))), audicions_repertorio(id, repertorio_asignado(texto_libre, numero_estudo, tipo, repertorio_xeral(titulo)))")
             .eq("evento_audicion_id", evento.id);
         if (error) {
             aviso(error.message, "erro");
@@ -2041,10 +2058,10 @@ function DetalleEventoAudicion({ evento, onClose, onCambio }) {
             return {
                 id: a.id, alumno: (_c = a.matriculas) === null || _c === void 0 ? void 0 : _c.alumnos, sesions,
                 obras: (a.audicions_repertorio || []).map(ar => {
-                    var _a, _b, _c, _d;
+                    var _a, _b, _c, _d, _f;
                     return ({
                         id: ar.id,
-                        titulo: tituloConNumero(((_b = (_a = ar.repertorio_asignado) === null || _a === void 0 ? void 0 : _a.repertorio_xeral) === null || _b === void 0 ? void 0 : _b.titulo) || ((_c = ar.repertorio_asignado) === null || _c === void 0 ? void 0 : _c.texto_libre) || "?", (_d = ar.repertorio_asignado) === null || _d === void 0 ? void 0 : _d.numero_estudo),
+                        titulo: tituloConNumero(((_b = (_a = ar.repertorio_asignado) === null || _a === void 0 ? void 0 : _a.repertorio_xeral) === null || _b === void 0 ? void 0 : _b.titulo) || ((_c = ar.repertorio_asignado) === null || _c === void 0 ? void 0 : _c.texto_libre) || "?", (_d = ar.repertorio_asignado) === null || _d === void 0 ? void 0 : _d.numero_estudo, (_f = ar.repertorio_asignado) === null || _f === void 0 ? void 0 : _f.tipo),
                     });
                 }),
             };
@@ -2432,13 +2449,12 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
                     opcionsCatalogo.map(o => (React.createElement("option", { key: o.id, value: o.id },
                         o.titulo,
                         o.autor ? ` — ${o.autor}` : "",
-                        o.total_estudos ? ` (${o.total_estudos} estudos)` : "")))),
+                        o.total_estudos ? (TIPOS_MOVEMENTO.includes(tipo) ? ` (${o.total_estudos} movementos)` : ` (${o.total_estudos} estudos)`) : "")))),
                 esLibro && (React.createElement("div", { style: { marginTop: 8 } },
-                    React.createElement("label", null,
-                        "N\u00FAmero(s) de estudo (1\u2013",
-                        esLibro,
-                        ") \u2014 pode ser m\u00E1is dun, separados por coma"),
-                    React.createElement("input", { type: "text", placeholder: "p.ex. 12, 15, 20", value: numerosEstudo, onChange: e => setNumerosEstudo(e.target.value) }))))) : (React.createElement("input", { type: "text", placeholder: "Nome da obra", value: textoLibre, onChange: e => setTextoLibre(e.target.value) })),
+                    React.createElement("label", null, TIPOS_MOVEMENTO.includes(tipo)
+                        ? `Movemento(s) (1–${esLibro}) — pode ser máis dun, separados por coma`
+                        : `Número(s) de estudo (1–${esLibro}) — pode ser máis dun, separados por coma`),
+                    React.createElement("input", { type: "text", placeholder: TIPOS_MOVEMENTO.includes(tipo) ? "p.ex. 1, 2" : "p.ex. 12, 15, 20", value: numerosEstudo, onChange: e => setNumerosEstudo(e.target.value) }))))) : (React.createElement("input", { type: "text", placeholder: "Nome da obra", value: textoLibre, onChange: e => setTextoLibre(e.target.value) })),
             React.createElement("div", { className: "row-actions" },
                 React.createElement("button", { type: "button", className: "btn", onClick: () => setMostrarAdd(false) }, "Cancelar"),
                 React.createElement("button", { className: "btn btn-primary" }, "Engadir")))) : (React.createElement("button", { className: "btn", style: { marginTop: 10, fontSize: 12.5 }, onClick: () => setMostrarAdd(true) }, "+ Engadir obra")),
@@ -2629,6 +2645,9 @@ function TarxetaClase({ fila, obrasDispoñibles, pesos, alumno, expandida, onExp
             React.createElement("div", { className: "clase-seccion", style: { borderLeftColor: "var(--oro)" } },
                 React.createElement("div", { className: "clase-seccion-titulo", style: { color: "#8a6d1f" } }, "Tarefas"),
                 React.createElement("textarea", { value: tarefas, onChange: e => setTarefas(e.target.value), onBlur: () => gardarCampo({ tarefas }), style: { minHeight: 70 } })),
+            React.createElement("div", { className: "clase-seccion", style: { borderLeftColor: "var(--sepia)" } },
+                React.createElement("div", { className: "clase-seccion-titulo", style: { color: "var(--sepia)" } }, "Observaci\u00F3ns (notas privadas \u2014 nunca se env\u00EDan)"),
+                React.createElement("textarea", { value: observacions, onChange: e => setObservacions(e.target.value), onBlur: () => gardarCampo({ observacions }), style: { minHeight: 70 } })),
             React.createElement("label", null, "Criterios de avaliaci\u00F3n"),
             React.createElement("div", { className: "grid2" }, pesos.map(p => (React.createElement("div", { key: p.key, className: "card", style: { padding: "10px 12px" } },
                 React.createElement("div", { className: "slabel", style: { marginBottom: 6 } },
@@ -2641,10 +2660,7 @@ function TarxetaClase({ fila, obrasDispoñibles, pesos, alumno, expandida, onExp
             estado === "incompleta" && React.createElement("div", { className: "field-note", style: { color: "var(--rojo)" } }, "\u26A0 Faltan criterios por encher \u2014 este d\u00EDa non contar\u00E1 na media at\u00E9 que os completes todos."),
             estado === "completa" && React.createElement("div", { className: "field-note", style: { color: "var(--verde)" } },
                 "Media do d\u00EDa: ",
-                fmt(media)),
-            React.createElement("div", { className: "clase-seccion", style: { borderLeftColor: "var(--sepia)", marginTop: 14 } },
-                React.createElement("div", { className: "clase-seccion-titulo", style: { color: "var(--sepia)" } }, "Observaci\u00F3ns (notas privadas \u2014 nunca se env\u00EDan)"),
-                React.createElement("textarea", { value: observacions, onChange: e => setObservacions(e.target.value), onBlur: () => gardarCampo({ observacions }), style: { minHeight: 70 } })))),
+                fmt(media)))),
         React.createElement("div", { className: "row-actions" },
             React.createElement("button", { className: "btn", style: { fontSize: 12.5, padding: "6px 12px" }, onClick: () => setMostrarPdf(true) }, "PDF + Email \u00E1 familia"),
             React.createElement("button", { className: "btn btn-danger", style: { fontSize: 12.5, padding: "6px 12px" }, onClick: borrar }, "Eliminar"),
@@ -2662,7 +2678,7 @@ function TabClases({ matriculaId, grao, alumno, matricula }) {
         setFilas(null);
         const [{ data: clasesData, error }, { data: asignadoData }] = await Promise.all([
             sb.from("clases")
-                .select("*, clases_repertorio(*, repertorio_asignado(id, texto_libre, numero_estudo, repertorio_xeral(titulo,autor)))")
+                .select("*, clases_repertorio(*, repertorio_asignado(id, texto_libre, numero_estudo, tipo, repertorio_xeral(titulo,autor)))")
                 .eq("matricula_id", matriculaId).eq("trimestre", trimestre)
                 .order("data", { ascending: true })
                 .order("created_at", { foreignTable: "clases_repertorio", ascending: true }),
@@ -2675,18 +2691,18 @@ function TabClases({ matriculaId, grao, alumno, matricula }) {
             return;
         }
         const procesadas = (clasesData || []).map(c => (Object.assign(Object.assign(Object.assign({}, c), (c.notas || {})), { obras: (c.clases_repertorio || []).map(cr => {
-                var _a, _b, _c, _d, _f, _g;
+                var _a, _b, _c, _d, _f, _g, _h;
                 return ({
                     id: cr.id, repertorio_asignado_id: cr.repertorio_asignado_id, progreso: cr.progreso || "",
-                    titulo: tituloConNumero(((_b = (_a = cr.repertorio_asignado) === null || _a === void 0 ? void 0 : _a.repertorio_xeral) === null || _b === void 0 ? void 0 : _b.titulo) || ((_c = cr.repertorio_asignado) === null || _c === void 0 ? void 0 : _c.texto_libre) || "(obra eliminada)", (_d = cr.repertorio_asignado) === null || _d === void 0 ? void 0 : _d.numero_estudo),
-                    autor: ((_g = (_f = cr.repertorio_asignado) === null || _f === void 0 ? void 0 : _f.repertorio_xeral) === null || _g === void 0 ? void 0 : _g.autor) || null,
+                    titulo: tituloConNumero(((_b = (_a = cr.repertorio_asignado) === null || _a === void 0 ? void 0 : _a.repertorio_xeral) === null || _b === void 0 ? void 0 : _b.titulo) || ((_c = cr.repertorio_asignado) === null || _c === void 0 ? void 0 : _c.texto_libre) || "(obra eliminada)", (_d = cr.repertorio_asignado) === null || _d === void 0 ? void 0 : _d.numero_estudo, (_f = cr.repertorio_asignado) === null || _f === void 0 ? void 0 : _f.tipo),
+                    autor: ((_h = (_g = cr.repertorio_asignado) === null || _g === void 0 ? void 0 : _g.repertorio_xeral) === null || _h === void 0 ? void 0 : _h.autor) || null,
                 });
             }) })));
         setFilas(procesadas);
         setObrasAsignadas((asignadoData || []).map(a => {
             var _a, _b;
             return ({
-                id: a.id, titulo: tituloConNumero(((_a = a.repertorio_xeral) === null || _a === void 0 ? void 0 : _a.titulo) || a.texto_libre || "?", a.numero_estudo), autor: ((_b = a.repertorio_xeral) === null || _b === void 0 ? void 0 : _b.autor) || null,
+                id: a.id, titulo: tituloConNumero(((_a = a.repertorio_xeral) === null || _a === void 0 ? void 0 : _a.titulo) || a.texto_libre || "?", a.numero_estudo, a.tipo), autor: ((_b = a.repertorio_xeral) === null || _b === void 0 ? void 0 : _b.autor) || null,
             });
         }));
         if (idParaAbrir !== undefined) {
@@ -2902,7 +2918,7 @@ function TabAudicions({ matriculaId }) {
     async function cargar() {
         setFilas(null);
         const [{ data: audiData, error }, { data: asignadoData }] = await Promise.all([
-            sb.from("audicions").select("*, audicions_repertorio(*, repertorio_asignado(texto_libre, numero_estudo, repertorio_xeral(titulo)))")
+            sb.from("audicions").select("*, audicions_repertorio(*, repertorio_asignado(texto_libre, numero_estudo, tipo, repertorio_xeral(titulo)))")
                 .eq("matricula_id", matriculaId).eq("trimestre", trimestre).order("data", { ascending: true }),
             sb.from("repertorio_asignado").select("*, repertorio_xeral(titulo,autor)")
                 .eq("matricula_id", matriculaId).eq("trimestre", trimestre).eq("completada", false).order("tipo"),
@@ -2912,17 +2928,17 @@ function TabAudicions({ matriculaId }) {
             return;
         }
         const procesadas = (audiData || []).map(a => (Object.assign(Object.assign({}, a), { obras: (a.audicions_repertorio || []).map(ar => {
-                var _a, _b, _c, _d;
+                var _a, _b, _c, _d, _f;
                 return ({
                     id: ar.id, repertorio_asignado_id: ar.repertorio_asignado_id,
-                    titulo: tituloConNumero(((_b = (_a = ar.repertorio_asignado) === null || _a === void 0 ? void 0 : _a.repertorio_xeral) === null || _b === void 0 ? void 0 : _b.titulo) || ((_c = ar.repertorio_asignado) === null || _c === void 0 ? void 0 : _c.texto_libre) || "?", (_d = ar.repertorio_asignado) === null || _d === void 0 ? void 0 : _d.numero_estudo),
+                    titulo: tituloConNumero(((_b = (_a = ar.repertorio_asignado) === null || _a === void 0 ? void 0 : _a.repertorio_xeral) === null || _b === void 0 ? void 0 : _b.titulo) || ((_c = ar.repertorio_asignado) === null || _c === void 0 ? void 0 : _c.texto_libre) || "?", (_d = ar.repertorio_asignado) === null || _d === void 0 ? void 0 : _d.numero_estudo, (_f = ar.repertorio_asignado) === null || _f === void 0 ? void 0 : _f.tipo),
                 });
             }) })));
         setFilas(procesadas);
         setObrasAsignadas((asignadoData || []).map(a => {
             var _a, _b;
             return ({
-                id: a.id, titulo: tituloConNumero(((_a = a.repertorio_xeral) === null || _a === void 0 ? void 0 : _a.titulo) || a.texto_libre || "?", a.numero_estudo), autor: ((_b = a.repertorio_xeral) === null || _b === void 0 ? void 0 : _b.autor) || null,
+                id: a.id, titulo: tituloConNumero(((_a = a.repertorio_xeral) === null || _a === void 0 ? void 0 : _a.titulo) || a.texto_libre || "?", a.numero_estudo, a.tipo), autor: ((_b = a.repertorio_xeral) === null || _b === void 0 ? void 0 : _b.autor) || null,
             });
         }));
     }
@@ -3154,17 +3170,23 @@ function TabTitorias({ matriculaId, alumno }) {
 // ============================================================
 // FICHA DE ALUMNO (contedor de tabs)
 // ============================================================
-function FichaAlumno({ matricula, onVolver, onCambio }) {
+function FichaAlumno({ matricula: matriculaInicial, onVolver, onCambio }) {
     const [tab, setTab] = useState("ficha");
     const [subClases, setSubClases] = useState("clases");
     const [subAval, setSubAval] = useState("audicions");
-    const [alumno, setAlumno] = useState(matricula.alumnos);
+    const [alumno, setAlumno] = useState(matriculaInicial.alumnos);
+    const [matricula, setMatricula] = useState(matriculaInicial);
     const [materias, setMaterias] = useState([]);
     const cualificacions = useCualificacions(matricula.id, matricula.grao);
     async function recargarAlumno() {
-        const { data } = await sb.from("alumnos").select("*").eq("id", matricula.alumno_id).single();
-        if (data)
-            setAlumno(data);
+        const [{ data: dAlumno }, { data: dMatricula }] = await Promise.all([
+            sb.from("alumnos").select("*").eq("id", matricula.alumno_id).single(),
+            sb.from("matriculas").select("*").eq("id", matricula.id).single(),
+        ]);
+        if (dAlumno)
+            setAlumno(dAlumno);
+        if (dMatricula)
+            setMatricula(m => (Object.assign(Object.assign({}, m), dMatricula)));
     }
     async function recargarMaterias() {
         const { data } = await sb.from("materias").select("*, horarios_materia(*)").eq("matricula_id", matricula.id);
