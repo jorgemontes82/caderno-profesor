@@ -2282,7 +2282,7 @@ function RepertorioXeral() {
                   </div>
                 )}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="titulo">{o.titulo}{o.total_estudos ? ` — ${o.total_estudos} estudos` : ""}</div>
+                  <div className="titulo">{o.titulo}{o.total_estudos ? (TIPOS_MOVEMENTO.includes(o.tipo) ? ` — ${o.total_estudos} movementos` : ` — ${o.total_estudos} estudos`) : ""}</div>
                   {o.autor && <div className="autor">{o.autor}</div>}
                   {o.libro_id && librosPorIdXeral[o.libro_id] && (
                     <span className="chip" style={{ cursor: "default", background: "#eee8fd", color: "#5b3bc4" }}>📚 {librosPorIdXeral[o.libro_id].titulo}</span>
@@ -2478,7 +2478,7 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
             )}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="titulo" style={item.completada ? { textDecoration: "line-through", color: "var(--sepia)" } : undefined}>
-                {xeral ? `${xeral.titulo}${item.numero_estudo ? " Nº" + item.numero_estudo : ""}` : item.texto_libre}
+                {xeral ? tituloConNumero(xeral.titulo, item.numero_estudo, item.tipo) : item.texto_libre}
               </div>
               {xeral && xeral.autor && <div className="autor">{xeral.autor}</div>}
               {item.completada && <span className="chip" style={{ background: "#e8f5ed", color: "var(--verde)" }}>Completada</span>}
@@ -2549,7 +2549,7 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
         <HistorialObra
           titulo={(() => {
             const xeral = historialAberto.repertorio_xeral_id ? catalogo.find(o=>o.id===historialAberto.repertorio_xeral_id) : null;
-            return xeral ? `${xeral.titulo}${historialAberto.numero_estudo ? " Nº"+historialAberto.numero_estudo : ""}` : historialAberto.texto_libre;
+            return xeral ? tituloConNumero(xeral.titulo, historialAberto.numero_estudo, historialAberto.tipo) : historialAberto.texto_libre;
           })()}
           matriculaId={matriculaId} repertorioAsignadoId={historialAberto.id}
           onClose={()=>setHistorialAberto(null)}
@@ -2591,7 +2591,7 @@ function TabRepertorio({ matriculaId, alumno, matricula }) {
     TIPOS_REPERTORIO.forEach(tipo => {
       itensPorTipo[tipo] = itens.filter(i=>i.tipo===tipo).map(item => {
         const xeral = item.repertorio_xeral_id ? catalogo.find(o=>o.id===item.repertorio_xeral_id) : null;
-        return xeral ? `${xeral.titulo}${item.numero_estudo ? " Nº"+item.numero_estudo : ""}${xeral.autor ? " — "+xeral.autor : ""}` : item.texto_libre;
+        return xeral ? `${tituloConNumero(xeral.titulo, item.numero_estudo, tipo)}${xeral.autor ? " — "+xeral.autor : ""}` : item.texto_libre;
       });
     });
     const ficheiro = exportarRepertorioTrimestrePDF(alumno, matricula, trimestreLabel, itensPorTipo);
