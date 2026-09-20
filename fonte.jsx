@@ -1416,6 +1416,7 @@ function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
     total_estudos: (obra?.total_estudos ?? "") === null ? "" : (obra?.total_estudos ?? ""),
   });
   const [ficheiro, setFicheiro] = useState(null);
+  const [ficheiroPiano, setFicheiroPiano] = useState(null);
   const [subindo, setSubindo] = useState(false);
 
   const [tipoRapido, setTipoRapido] = useState(obra?.tipo || "Estudos");
@@ -1437,8 +1438,17 @@ function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
       if (eUp) { aviso("Erro ao subir o PDF: " + eUp.message, "erro"); setSubindo(false); return; }
       pdf_path = path; pdf_nome = ficheiro.name;
     }
+    let pdf_piano_path = obra?.pdf_piano_path || null;
+    let pdf_piano_nome = obra?.pdf_piano_nome || null;
+    if (ficheiroPiano) {
+      const pathPiano = `obras/${obra?.id || generarUUID()}-piano.pdf`;
+      const { error: eUpP } = await sb.storage.from("repertorio").upload(pathPiano, ficheiroPiano, { upsert: true, contentType: "application/pdf" });
+      if (eUpP) { aviso("Erro ao subir o PDF de piano: " + eUpP.message, "erro"); setSubindo(false); return; }
+      pdf_piano_path = pathPiano; pdf_piano_nome = ficheiroPiano.name;
+    }
     const payload = {
       tipo: f.tipo, titulo: f.titulo, autor: f.autor, niveis: f.niveis, observacions: f.observacions, pdf_path, pdf_nome,
+      pdf_piano_path, pdf_piano_nome,
       total_estudos: f.total_estudos === "" ? null : Number(f.total_estudos),
     };
     let error;
@@ -1535,9 +1545,12 @@ function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
         <TagInput valores={f.niveis} onChange={v=>setF({...f,niveis:v})} placeholder="p.ex. 2º GE" />
         <label>Observacións</label>
         <textarea value={f.observacions} onChange={e=>setF({...f,observacions:e.target.value})}></textarea>
-        <label>PDF{obra?.pdf_nome ? ` (actual: ${obra.pdf_nome})` : ""}</label>
+        <label>PDF — parte principal{obra?.pdf_nome ? ` (actual: ${obra.pdf_nome})` : ""}</label>
         <input type="file" accept="application/pdf" onChange={e=>setFicheiro(e.target.files[0])} />
         <div className="field-note">{obra?.pdf_path ? "Sube un arquivo novo para substituír o PDF actual." : "Opcional."}</div>
+        <label>PDF — acompañamento de piano{obra?.pdf_piano_nome ? ` (actual: ${obra.pdf_piano_nome})` : ""}</label>
+        <input type="file" accept="application/pdf" onChange={e=>setFicheiroPiano(e.target.files[0])} />
+        <div className="field-note">{obra?.pdf_piano_path ? "Sube un arquivo novo para substituír o PDF actual." : "Opcional. Aparecerá en Pianistas."}</div>
         <div className="row-actions">
           <button type="button" className="btn" onClick={onClose}>Cancelar</button>
           <button className="btn btn-primary" disabled={subindo}>{subindo ? "Gardando…" : "Gardar"}</button>
@@ -1598,7 +1611,7 @@ function PianistasXeral({ anoEscolar }) {
     });
 
     const { data: obras, error: e2 } = await sb.from("repertorio_asignado")
-      .select("*, repertorio_xeral(titulo,autor)")
+      .select("*, repertorio_xeral(titulo,autor,pdf_piano_path,pdf_piano_nome)")
       .in("matricula_id", matriculas.map(m=>m.id))
       .eq("trimestre", trimestre)
       .eq("necesita_acompanamento", true);
@@ -1616,6 +1629,7 @@ function PianistasXeral({ anoEscolar }) {
         id: o.id, entregada: o.entregada, para_ensaiar: o.para_ensaiar, avisado: o.avisado,
         titulo: tituloConNumero(o.repertorio_xeral?.titulo || o.texto_libre || "?", o.numero_estudo, o.tipo),
         autor: o.repertorio_xeral?.autor || null,
+        pdfPiano: o.repertorio_xeral?.pdf_piano_path || null,
       });
     });
     setDatos(agrupado);
@@ -1692,7 +1706,12 @@ function PianistasXeral({ anoEscolar }) {
               </div>
               {a.obras.map(o => (
                 <div key={o.id} style={{ padding: "6px 0", borderBottom: "1px solid var(--crema)" }}>
-                  <div style={{ fontSize: 13.5, marginBottom: 4 }}>{o.titulo}{o.autor ? ` — ${o.autor}` : ""}</div>
+                  <div style={{ fontSize: 13.5, marginBottom: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span>{o.titulo}{o.autor ? ` — ${o.autor}` : ""}</span>
+                    {o.pdfPiano && (
+                      <a className="pdf-link" href={urlPdfRepertorio(o.pdfPiano)} target="_blank" rel="noopener noreferrer">🎹 Ver parte de piano</a>
+                    )}
+                  </div>
                   <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
                     <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--sepia)" }}>
                       <input type="checkbox" checked={o.entregada} onChange={()=>alternarEntregada(o)} style={{ width: 16, height: 16 }} />
@@ -1958,6 +1977,202 @@ function AudicionsXerais({ anoEscolar }) {
   );
 }
 
+function FormLibro({ libro, onClose, onGardado }) {
+  const [f, setF] = useState({ titulo: libro?.titulo || "", autor: libro?.autor || "", tipo: libro?.tipo || "Pezas" });
+  const [ficheiro, setFicheiro] = useState(null);
+  const [gardando, setGardando] = useState(false);
+
+  async function gardar(e) {
+    e.preventDefault();
+    setGardando(true);
+    let pdf_path = libro?.pdf_path || null;
+    let pdf_nome = libro?.pdf_nome || null;
+    if (ficheiro) {
+      const path = `obras/${libro?.id || generarUUID()}-libro.pdf`;
+      const { error: eUp } = await sb.storage.from("repertorio").upload(path, ficheiro, { upsert: true, contentType: "application/pdf" });
+      if (eUp) { aviso("Erro ao subir o PDF: " + eUp.message, "erro"); setGardando(false); return; }
+      pdf_path = path; pdf_nome = ficheiro.name;
+    }
+    const payload = { titulo: f.titulo, autor: f.autor, tipo: f.tipo, es_libro: true, pdf_path, pdf_nome };
+    let error;
+    if (libro?.id) {
+      ({ error } = await sb.from("repertorio_xeral").update(payload).eq("id", libro.id));
+    } else {
+      ({ error } = await sb.from("repertorio_xeral").insert(payload));
+    }
+    setGardando(false);
+    if (error) { aviso(error.message, "erro"); return; }
+    onGardado();
+  }
+
+  return (
+    <Modal title={libro ? "Editar libro" : "Novo libro"} onClose={onClose}>
+      <form onSubmit={gardar}>
+        <Campo label="Título do libro" value={f.titulo} onChange={e=>setF({...f,titulo:e.target.value})} required />
+        <Campo label="Autor / Compilador" value={f.autor} onChange={e=>setF({...f,autor:e.target.value})} />
+        <label>Tipo das pezas que contén</label>
+        <select className="field" value={f.tipo} onChange={e=>setF({...f,tipo:e.target.value})}>
+          {TIPOS_REPERTORIO.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <label>PDF do libro completo{libro?.pdf_nome ? ` (actual: ${libro.pdf_nome})` : ""}</label>
+        <input type="file" accept="application/pdf" onChange={e=>setFicheiro(e.target.files[0])} />
+        <div className="field-note">Opcional — o libro enteiro escaneado, se o tes.</div>
+        <div className="row-actions">
+          <button type="button" className="btn" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-primary" disabled={gardando}>{gardando ? "Gardando…" : "Gardar"}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function FormPeza({ libro, peza, autoresSuxeridos, onClose, onGardado }) {
+  const [f, setF] = useState({ titulo: peza?.titulo || "", autor: peza?.autor || "" });
+  const [ficheiro, setFicheiro] = useState(null);
+  const [ficheiroPiano, setFicheiroPiano] = useState(null);
+  const [gardando, setGardando] = useState(false);
+
+  async function gardar(e) {
+    e.preventDefault();
+    setGardando(true);
+    let pdf_path = peza?.pdf_path || null;
+    let pdf_nome = peza?.pdf_nome || null;
+    if (ficheiro) {
+      const path = `obras/${peza?.id || generarUUID()}.pdf`;
+      const { error: eUp } = await sb.storage.from("repertorio").upload(path, ficheiro, { upsert: true, contentType: "application/pdf" });
+      if (eUp) { aviso("Erro ao subir o PDF: " + eUp.message, "erro"); setGardando(false); return; }
+      pdf_path = path; pdf_nome = ficheiro.name;
+    }
+    let pdf_piano_path = peza?.pdf_piano_path || null;
+    let pdf_piano_nome = peza?.pdf_piano_nome || null;
+    if (ficheiroPiano) {
+      const pathP = `obras/${peza?.id || generarUUID()}-piano.pdf`;
+      const { error: eUpP } = await sb.storage.from("repertorio").upload(pathP, ficheiroPiano, { upsert: true, contentType: "application/pdf" });
+      if (eUpP) { aviso("Erro ao subir o PDF de piano: " + eUpP.message, "erro"); setGardando(false); return; }
+      pdf_piano_path = pathP; pdf_piano_nome = ficheiroPiano.name;
+    }
+    const payload = {
+      titulo: f.titulo, autor: f.autor, tipo: libro.tipo, libro_id: libro.id,
+      pdf_path, pdf_nome, pdf_piano_path, pdf_piano_nome,
+    };
+    let error;
+    if (peza?.id) {
+      ({ error } = await sb.from("repertorio_xeral").update(payload).eq("id", peza.id));
+    } else {
+      const { data: max } = await sb.from("repertorio_xeral").select("orde").eq("libro_id", libro.id).order("orde", { ascending: false }).limit(1);
+      const orde = (max && max[0] ? max[0].orde : 0) + 1;
+      ({ error } = await sb.from("repertorio_xeral").insert({ ...payload, orde }));
+    }
+    setGardando(false);
+    if (error) { aviso(error.message, "erro"); return; }
+    onGardado();
+  }
+
+  return (
+    <Modal title={peza ? "Editar peza" : "Nova peza"} onClose={onClose}>
+      <form onSubmit={gardar}>
+        <Campo label="Título da peza" value={f.titulo} onChange={e=>setF({...f,titulo:e.target.value})} required />
+        <label>Autor</label>
+        <input type="text" list="autores-suxeridos-peza" value={f.autor} onChange={e=>setF({...f,autor:e.target.value})} />
+        <datalist id="autores-suxeridos-peza">
+          {autoresSuxeridos.map(a => <option key={a} value={a} />)}
+        </datalist>
+        <label>PDF — parte principal{peza?.pdf_nome ? ` (actual: ${peza.pdf_nome})` : ""}</label>
+        <input type="file" accept="application/pdf" onChange={e=>setFicheiro(e.target.files[0])} />
+        <label>PDF — acompañamento de piano{peza?.pdf_piano_nome ? ` (actual: ${peza.pdf_piano_nome})` : ""}</label>
+        <input type="file" accept="application/pdf" onChange={e=>setFicheiroPiano(e.target.files[0])} />
+        <div className="row-actions">
+          <button type="button" className="btn" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-primary" disabled={gardando}>{gardando ? "Gardando…" : "Gardar"}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function DetalleLibro({ libro, autoresSuxeridos, onClose, onCambio }) {
+  const [pezas, setPezas] = useState(null);
+  const [mostrarFormLibro, setMostrarFormLibro] = useState(false);
+  const [mostrarFormPeza, setMostrarFormPeza] = useState(false);
+  const [editandoPeza, setEditandoPeza] = useState(null);
+  const [libroActual, setLibroActual] = useState(libro);
+
+  async function cargar() {
+    const { data, error } = await sb.from("repertorio_xeral").select("*").eq("libro_id", libro.id).order("orde");
+    if (error) { aviso(error.message, "erro"); return; }
+    setPezas(data);
+  }
+  useEffect(() => { cargar(); }, [libro.id]);
+
+  async function recargarLibro() {
+    const { data } = await sb.from("repertorio_xeral").select("*").eq("id", libro.id).single();
+    if (data) setLibroActual(data);
+  }
+
+  async function eliminarLibro() {
+    if (!confirm(`Eliminar o libro "${libroActual.titulo}" e TODAS as súas ${pezas?.length||0} pezas? Tamén desaparecerán dos alumnos que as teñan asignadas.`)) return;
+    if (libroActual.pdf_path) await sb.storage.from("repertorio").remove([libroActual.pdf_path]);
+    await gardarSeguro(sb.from("repertorio_xeral").delete().eq("id", libroActual.id), "repertorio_xeral");
+    onCambio();
+    onClose();
+  }
+  async function eliminarPeza(peza) {
+    if (!confirm(`Eliminar "${peza.titulo}"?`)) return;
+    if (peza.pdf_path) await sb.storage.from("repertorio").remove([peza.pdf_path]);
+    if (peza.pdf_piano_path) await sb.storage.from("repertorio").remove([peza.pdf_piano_path]);
+    await gardarSeguro(sb.from("repertorio_xeral").delete().eq("id", peza.id), "repertorio_xeral");
+    cargar();
+  }
+
+  return (
+    <Modal title={libroActual.titulo} onClose={onClose}>
+      <div className="field-note" style={{ marginBottom: 10 }}>
+        {libroActual.autor && <span>{libroActual.autor} · </span>}{libroActual.tipo}
+      </div>
+      <div className="row-actions" style={{ marginBottom: 14 }}>
+        <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={()=>setMostrarFormLibro(true)}>Editar libro</button>
+        {libroActual.pdf_path && (
+          <a className="pdf-link" href={urlPdfRepertorio(libroActual.pdf_path)} target="_blank" rel="noopener noreferrer">📄 PDF completo</a>
+        )}
+        <button className="btn btn-danger" style={{ fontSize: 12, marginLeft: "auto" }} onClick={eliminarLibro}>Eliminar libro</button>
+      </div>
+
+      {pezas === null && <div className="empty">Cargando…</div>}
+      {pezas !== null && pezas.length === 0 && <div className="empty">Aínda non hai pezas neste libro.</div>}
+      {pezas !== null && pezas.map(p => (
+        <div key={p.id} className="obra-row">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="titulo">{p.titulo}</div>
+            {p.autor && <div className="autor">{p.autor}</div>}
+          </div>
+          {p.pdf_path && <a className="pdf-link" href={urlPdfRepertorio(p.pdf_path)} target="_blank" rel="noopener noreferrer">📄</a>}
+          {p.pdf_piano_path && <a className="pdf-link" href={urlPdfRepertorio(p.pdf_piano_path)} target="_blank" rel="noopener noreferrer">🎹</a>}
+          <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: 12 }} onClick={()=>setEditandoPeza(p)}>Editar</button>
+          <button className="btn btn-danger" style={{ padding: "4px 8px", fontSize: 12 }} onClick={()=>eliminarPeza(p)}>✕</button>
+        </div>
+      ))}
+
+      <button className="btn btn-block" style={{ marginTop: 12 }} onClick={()=>setMostrarFormPeza(true)}>+ Engadir peza</button>
+      <div className="row-actions">
+        <button className="btn" onClick={onClose}>Pechar</button>
+      </div>
+
+      {mostrarFormLibro && (
+        <FormLibro libro={libroActual} onClose={()=>setMostrarFormLibro(false)}
+          onGardado={()=>{ setMostrarFormLibro(false); recargarLibro(); onCambio(); }} />
+      )}
+      {mostrarFormPeza && (
+        <FormPeza libro={libroActual} autoresSuxeridos={autoresSuxeridos} onClose={()=>setMostrarFormPeza(false)}
+          onGardado={()=>{ setMostrarFormPeza(false); cargar(); onCambio(); }} />
+      )}
+      {editandoPeza && (
+        <FormPeza libro={libroActual} peza={editandoPeza} autoresSuxeridos={autoresSuxeridos} onClose={()=>setEditandoPeza(null)}
+          onGardado={()=>{ setEditandoPeza(null); cargar(); onCambio(); }} />
+      )}
+    </Modal>
+  );
+}
+
 function RepertorioXeral() {
   const [obras, setObras] = useState(null);
   const [filtroTipo, setFiltroTipo] = useState("");
@@ -1966,6 +2181,10 @@ function RepertorioXeral() {
   const [editando, setEditando] = useState(null);
   const [tiposOrdenando, setTiposOrdenando] = useState({});
   const [abertaId, setAbertaId] = useState(null);
+  const [vista, setVista] = useState("obras");
+  const [mostrarFormLibro, setMostrarFormLibro] = useState(false);
+  const [libroAberto, setLibroAberto] = useState(null);
+  const [editandoPeza, setEditandoPeza] = useState(null);
   function alternarOrdenar(tipo) { setTiposOrdenando(prev => ({ ...prev, [tipo]: !prev[tipo] })); }
 
   async function cargar() {
@@ -1979,6 +2198,14 @@ function RepertorioXeral() {
     if (!obras) return [];
     return [...new Set(obras.map(o => o.autor).filter(Boolean))].sort();
   }, [obras]);
+
+  const obrasSoltas = useMemo(() => (obras || []).filter(o => !o.es_libro), [obras]);
+  const librosPorIdXeral = useMemo(() => {
+    const m = {};
+    (obras || []).filter(o => o.es_libro).forEach(l => { m[l.id] = l; });
+    return m;
+  }, [obras]);
+  const libros = useMemo(() => (obras || []).filter(o => o.es_libro), [obras]);
 
   async function eliminar(obra) {
     if (!confirm(`Eliminar "${obra.titulo}" do repertorio xeral? Tamén desaparecerá dos alumnos que a teñan asignada.`)) return;
@@ -1998,14 +2225,14 @@ function RepertorioXeral() {
   }
 
   const filtradas = useMemo(() => {
-    if (!obras) return [];
-    return obras.filter(o => {
+    return obrasSoltas.filter(o => {
       if (filtroTipo && o.tipo !== filtroTipo) return false;
       const q = busca.trim().toLowerCase();
       if (!q) return true;
-      return `${o.titulo} ${o.autor||""} ${(o.niveis||[]).join(" ")}`.toLowerCase().includes(q);
+      const nomeLibro = o.libro_id && librosPorIdXeral[o.libro_id] ? librosPorIdXeral[o.libro_id].titulo : "";
+      return `${o.titulo} ${o.autor||""} ${(o.niveis||[]).join(" ")} ${nomeLibro}`.toLowerCase().includes(q);
     });
-  }, [obras, filtroTipo, busca]);
+  }, [obrasSoltas, filtroTipo, busca, librosPorIdXeral]);
 
   const agrupadas = useMemo(() => {
     const g = {};
@@ -2019,6 +2246,13 @@ function RepertorioXeral() {
   return (
     <div className="wrap">
       <h2 className="serif" style={{ marginBottom: 14, fontSize: 21 }}>Repertorio xeral</h2>
+      <div className="subtabs" style={{ marginBottom: 14 }}>
+        <button className={vista==="obras"?"active":""} onClick={()=>setVista("obras")}>Todas as obras</button>
+        <button className={vista==="libros"?"active":""} onClick={()=>setVista("libros")}>Libros ({libros.length})</button>
+      </div>
+
+      {vista === "obras" ? (
+        <React.Fragment>
       <div className="toolbar">
         <input className="search" type="text" placeholder="Buscar título, autor ou nivel…" value={busca} onChange={e=>setBusca(e.target.value)} />
         <select className="field" style={{ maxWidth: 170 }} value={filtroTipo} onChange={e=>setFiltroTipo(e.target.value)}>
@@ -2050,6 +2284,9 @@ function RepertorioXeral() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="titulo">{o.titulo}{o.total_estudos ? ` — ${o.total_estudos} estudos` : ""}</div>
                   {o.autor && <div className="autor">{o.autor}</div>}
+                  {o.libro_id && librosPorIdXeral[o.libro_id] && (
+                    <span className="chip" style={{ cursor: "default", background: "#eee8fd", color: "#5b3bc4" }}>📚 {librosPorIdXeral[o.libro_id].titulo}</span>
+                  )}
                   {(o.niveis||[]).length > 0 && (
                     <div style={{ marginTop: 4 }}>
                       {o.niveis.map(n => <span key={n} className="chip" style={{ cursor: "default" }}>{n}</span>)}
@@ -2060,7 +2297,11 @@ function RepertorioXeral() {
                 {o.pdf_path && (
                   <a className="pdf-link" href={urlPdfRepertorio(o.pdf_path)} target="_blank" rel="noopener noreferrer">📄 PDF</a>
                 )}
-                <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: 12 }} onClick={()=>setEditando(o)}>Editar</button>
+                {o.pdf_piano_path && (
+                  <a className="pdf-link" href={urlPdfRepertorio(o.pdf_piano_path)} target="_blank" rel="noopener noreferrer">🎹 Piano</a>
+                )}
+                <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: 12 }}
+                  onClick={()=> o.libro_id ? setEditandoPeza({ peza: o, libro: librosPorIdXeral[o.libro_id] }) : setEditando(o)}>Editar</button>
               </div>
               </FilaEliminable>
             ))}
@@ -2077,6 +2318,33 @@ function RepertorioXeral() {
       {editando && (
         <FormObraXeral obra={editando} autoresSuxeridos={autoresExistentes} onClose={()=>setEditando(null)}
           onGardado={()=>{ setEditando(null); cargar(); }} />
+      )}
+      {editandoPeza && (
+        <FormPeza libro={editandoPeza.libro} peza={editandoPeza.peza} autoresSuxeridos={autoresExistentes}
+          onClose={()=>setEditandoPeza(null)} onGardado={()=>{ setEditandoPeza(null); cargar(); }} />
+      )}
+        </React.Fragment>
+      ) : (
+        <React.Fragment>
+          {libros.length === 0 && <div className="empty">Aínda non hai libros.<br/>Toca "+" para crear o primeiro.</div>}
+          {libros.map(l => (
+            <div key={l.id} className="alumno-row" onClick={()=>setLibroAberto(l)}>
+              <div className="info">
+                <div className="nome">{l.titulo}</div>
+                <div className="meta">{l.autor ? `${l.autor} · ` : ""}{l.tipo}</div>
+              </div>
+              <span className="tag">{l.pdf_path ? "📄" : ""}</span>
+            </div>
+          ))}
+          <button className="fab" onClick={()=>setMostrarFormLibro(true)}>+</button>
+          {mostrarFormLibro && (
+            <FormLibro onClose={()=>setMostrarFormLibro(false)} onGardado={()=>{ setMostrarFormLibro(false); cargar(); }} />
+          )}
+          {libroAberto && (
+            <DetalleLibro libro={libroAberto} autoresSuxeridos={autoresExistentes}
+              onClose={()=>setLibroAberto(null)} onCambio={cargar} />
+          )}
+        </React.Fragment>
       )}
     </div>
   );
@@ -2121,7 +2389,12 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
   const [ordenando, setOrdenando] = useState(false);
   const [abertaId, setAbertaId] = useState(null);
   const [historialAberto, setHistorialAberto] = useState(null);
-  const opcionsCatalogo = catalogo.filter(o => o.tipo === tipo);
+  const opcionsCatalogo = catalogo.filter(o => o.tipo === tipo && !o.es_libro);
+  const librosPorId = useMemo(() => {
+    const m = {};
+    catalogo.filter(o => o.es_libro).forEach(l => { m[l.id] = l.titulo; });
+    return m;
+  }, [catalogo]);
   const libroSeleccionado = seleccionado ? opcionsCatalogo.find(o => o.id === seleccionado) : null;
   const esLibro = libroSeleccionado && libroSeleccionado.total_estudos;
 
@@ -2246,7 +2519,7 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
                 <option value="">— Selecciona unha obra —</option>
                 {opcionsCatalogo.map(o => (
                   <option key={o.id} value={o.id}>
-                    {o.titulo}{o.autor ? ` — ${o.autor}` : ""}{o.total_estudos ? (TIPOS_MOVEMENTO.includes(tipo) ? ` (${o.total_estudos} movementos)` : ` (${o.total_estudos} estudos)`) : ""}
+                    {o.titulo}{o.autor ? ` — ${o.autor}` : ""}{o.total_estudos ? (TIPOS_MOVEMENTO.includes(tipo) ? ` (${o.total_estudos} movementos)` : ` (${o.total_estudos} estudos)`) : ""}{o.libro_id && librosPorId[o.libro_id] ? ` [${librosPorId[o.libro_id]}]` : ""}
                   </option>
                 ))}
               </select>
