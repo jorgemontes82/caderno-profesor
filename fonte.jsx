@@ -910,8 +910,7 @@ function ListaAlumnos({ anoEscolar, onAbrir }) {
       .sort((a,b) => claveOrdeHorario(a.horarioViolin) - claveOrdeHorario(b.horarioViolin));
     await Promise.all(procesadas.map(async m => {
       if (!m.alumnos.foto_path) return;
-      const { data: signed } = await sb.storage.from("fotos-alumnos").createSignedUrl(m.alumnos.foto_path, 3600);
-      if (signed) m.fotoUrl = signed.signedUrl;
+      m.fotoUrl = await obterUrlFotoCacheada(m.alumnos.foto_path);
     }));
     setFilas(procesadas);
   }
@@ -975,8 +974,8 @@ function FotoAlumno({ alumno, onAtualizado }) {
 
   async function cargarUrl() {
     if (!alumno.foto_path) { setUrl(null); return; }
-    const { data, error } = await sb.storage.from("fotos-alumnos").createSignedUrl(alumno.foto_path, 3600);
-    if (!error) setUrl(data.signedUrl);
+    const signedUrl = await obterUrlFotoCacheada(alumno.foto_path);
+    if (signedUrl) setUrl(signedUrl);
   }
   useEffect(() => { cargarUrl(); }, [alumno.foto_path]);
 
@@ -984,9 +983,11 @@ function FotoAlumno({ alumno, onAtualizado }) {
     const ficheiro = e.target.files[0];
     if (!ficheiro) return;
     setSubindo(true);
+    const reducida = await redimensionarImaxe(ficheiro, 400);
     const path = `${alumno.id}.jpg`;
-    const { error: eUp } = await sb.storage.from("fotos-alumnos").upload(path, ficheiro, { upsert: true, contentType: ficheiro.type || "image/jpeg" });
+    const { error: eUp } = await sb.storage.from("fotos-alumnos").upload(path, reducida, { upsert: true, contentType: "image/jpeg" });
     if (eUp) { aviso("Erro ao subir a foto: " + eUp.message, "erro"); setSubindo(false); return; }
+    delete cacheUrlsFotos[path];
     await gardarSeguro(sb.from("alumnos").update({ foto_path: path }).eq("id", alumno.id), "alumnos");
     setSubindo(false);
     onAtualizado();
@@ -994,7 +995,7 @@ function FotoAlumno({ alumno, onAtualizado }) {
 
   async function quitar() {
     if (!confirm("Quitar a foto do alumno?")) return;
-    if (alumno.foto_path) await sb.storage.from("fotos-alumnos").remove([alumno.foto_path]);
+    if (alumno.foto_path) { await sb.storage.from("fotos-alumnos").remove([alumno.foto_path]); delete cacheUrlsFotos[alumno.foto_path]; }
     await gardarSeguro(sb.from("alumnos").update({ foto_path: null }).eq("id", alumno.id), "alumnos");
     onAtualizado();
   }
@@ -1318,6 +1319,41 @@ function TabMaterias({ matriculaId, onCambio }) {
 // ============================================================
 // REPERTORIO — catálogo xeral e repertorio asignado por alumno
 // ============================================================
+// Redimensiona/comprime unha imaxe no propio navegador antes de subila (evita fotos de 3-5 MB dun móbil)
+function redimensionarImaxe(ficheiro, ladoMax) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(ficheiro);
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > ladoMax || height > ladoMax) {
+        if (width > height) { height = Math.round(height * ladoMax / width); width = ladoMax; }
+        else { width = Math.round(width * ladoMax / height); height = ladoMax; }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width; canvas.height = height;
+      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+      canvas.toBlob((blob) => resolve(blob || ficheiro), "image/jpeg", 0.82);
+    };
+    img.onerror = () => resolve(ficheiro);
+    img.src = url;
+  });
+}
+
+// Caché en memoria de URLs firmadas (evita pedila outra vez cada vez que se recarga a lista)
+const cacheUrlsFotos = {};
+async function obterUrlFotoCacheada(path) {
+  if (!path) return null;
+  const agora = Date.now();
+  const gardada = cacheUrlsFotos[path];
+  if (gardada && gardada.expira > agora) return gardada.url;
+  const { data, error } = await sb.storage.from("fotos-alumnos").createSignedUrl(path, 3600);
+  if (error || !data) return null;
+  cacheUrlsFotos[path] = { url: data.signedUrl, expira: agora + 3500 * 1000 };
+  return data.signedUrl;
+}
+
 function generarUUID() {
   if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
@@ -1380,6 +1416,46 @@ function tituloConNumero(titulo, numeroEstudo, tipo) {
   if (!numeroEstudo) return titulo;
   if (tipo && TIPOS_MOVEMENTO.includes(tipo)) return `${titulo} — ${numeroEstudo}º movemento`;
   return `${titulo} Nº${numeroEstudo}`;
+}
+
+function CampoAutor({ valor, onChange, autoresSuxeridos, placeholder }) {
+  const [aberto, setAberto] = useState(false);
+  const contenedorRef = useRef(null);
+
+  useEffect(() => {
+    function onFora(e) {
+      if (contenedorRef.current && !contenedorRef.current.contains(e.target)) setAberto(false);
+    }
+    document.addEventListener("mousedown", onFora);
+    document.addEventListener("touchstart", onFora);
+    return () => {
+      document.removeEventListener("mousedown", onFora);
+      document.removeEventListener("touchstart", onFora);
+    };
+  }, []);
+
+  const q = (valor || "").trim().toLowerCase();
+  const suxestions = (autoresSuxeridos || [])
+    .filter(a => !q || (a.toLowerCase().includes(q) && a.toLowerCase() !== q))
+    .slice(0, 8);
+
+  return (
+    <div ref={contenedorRef} style={{ position: "relative" }}>
+      <input type="text" value={valor || ""} placeholder={placeholder}
+        onChange={e => { onChange(e.target.value); setAberto(true); }}
+        onFocus={() => setAberto(true)} autoComplete="off" />
+      {aberto && suxestions.length > 0 && (
+        <div className="autocompletar">
+          {suxestions.map(a => (
+            <div key={a} className="autocompletar-opcion"
+              onMouseDown={e => { e.preventDefault(); onChange(a); setAberto(false); }}>
+              {a}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function TagInput({ valores, onChange, placeholder }) {
@@ -1493,10 +1569,7 @@ function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
           <label>Título</label>
           <input ref={tituloRef} type="text" value={tituloRapido} onChange={e=>setTituloRapido(e.target.value)} required />
           <label>Autor (opcional)</label>
-          <input type="text" list="autores-suxeridos" value={autorRapido} onChange={e=>setAutorRapido(e.target.value)} />
-          <datalist id="autores-suxeridos">
-            {autoresSuxeridos.map(a => <option key={a} value={a} />)}
-          </datalist>
+          <CampoAutor valor={autorRapido} onChange={setAutorRapido} autoresSuxeridos={autoresSuxeridos} />
           <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14 }}>
             <input type="checkbox" checked={esColeccion} onChange={e=>setEsColeccion(e.target.checked)} style={{ width: 18, height: 18 }} />
             {TIPOS_MOVEMENTO.includes(tipoRapido) ? "Ten varios movementos" : "É unha colección numerada (ex. 42 estudos)"}
@@ -1536,10 +1609,7 @@ function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
         </select>
         <Campo label="Título" value={f.titulo} onChange={e=>setF({...f,titulo:e.target.value})} required />
         <label>Autor</label>
-        <input type="text" list="autores-suxeridos" value={f.autor} onChange={e=>setF({...f,autor:e.target.value})} />
-        <datalist id="autores-suxeridos">
-          {autoresSuxeridos.map(a => <option key={a} value={a} />)}
-        </datalist>
+        <CampoAutor valor={f.autor} onChange={v=>setF({...f,autor:v})} autoresSuxeridos={autoresSuxeridos} />
         <Campo label="Total de estudos/movementos (se é un libro, colección ou obra con varios movementos)" type="text" inputMode="numeric" value={f.total_estudos} onChange={e=>setF({...f,total_estudos:e.target.value})} />
         <label>Niveis</label>
         <TagInput valores={f.niveis} onChange={v=>setF({...f,niveis:v})} placeholder="p.ex. 2º GE" />
@@ -1912,7 +1982,7 @@ function TarefasXerais() {
       <form onSubmit={engadir} className="card">
         <label>Nova tarefa</label>
         <div style={{ display: "flex", gap: 8 }}>
-          <input type="text" placeholder="p.ex. Traer partitura a Marta" value={novoTexto} onChange={e=>setNovoTexto(e.target.value)} style={{ flex: 1 }} />
+          <input type="text" value={novoTexto} onChange={e=>setNovoTexto(e.target.value)} style={{ flex: 1 }} />
           <button className="btn btn-primary" disabled={engadindo}>{engadindo ? "…" : "+ Engadir"}</button>
         </div>
       </form>
@@ -2073,10 +2143,7 @@ function FormPeza({ libro, peza, autoresSuxeridos, onClose, onGardado }) {
       <form onSubmit={gardar}>
         <Campo label="Título da peza" value={f.titulo} onChange={e=>setF({...f,titulo:e.target.value})} required />
         <label>Autor</label>
-        <input type="text" list="autores-suxeridos-peza" value={f.autor} onChange={e=>setF({...f,autor:e.target.value})} />
-        <datalist id="autores-suxeridos-peza">
-          {autoresSuxeridos.map(a => <option key={a} value={a} />)}
-        </datalist>
+        <CampoAutor valor={f.autor} onChange={v=>setF({...f,autor:v})} autoresSuxeridos={autoresSuxeridos} />
         <label>PDF — parte principal{peza?.pdf_nome ? ` (actual: ${peza.pdf_nome})` : ""}</label>
         <input type="file" accept="application/pdf" onChange={e=>setFicheiro(e.target.files[0])} />
         <label>PDF — acompañamento de piano{peza?.pdf_piano_nome ? ` (actual: ${peza.pdf_piano_nome})` : ""}</label>
