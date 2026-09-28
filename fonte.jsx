@@ -885,6 +885,18 @@ function FilaAlumno({ m, abertaId, onAbrirSwipe, onAbrir, onEliminar }) {
   );
 }
 
+function proximoAniversario(dataNacemento) {
+  if (!dataNacemento) return null;
+  const partes = dataNacemento.split("-").map(Number);
+  if (partes.length !== 3) return null;
+  const [, mes, dia] = partes;
+  const hoxe = new Date(); hoxe.setHours(0,0,0,0);
+  let prox = new Date(hoxe.getFullYear(), mes - 1, dia);
+  if (prox < hoxe) prox = new Date(hoxe.getFullYear() + 1, mes - 1, dia);
+  const diasQuedan = Math.round((prox - hoxe) / 86400000);
+  return { diasQuedan, dataFormatada: `${String(dia).padStart(2,"0")}/${String(mes).padStart(2,"0")}` };
+}
+
 function ListaAlumnos({ anoEscolar, onAbrir }) {
   const [filas, setFilas] = useState(null);
   const [verArquivados, setVerArquivados] = useState(false);
@@ -925,6 +937,16 @@ function ListaAlumnos({ anoEscolar, onAbrir }) {
   }, [filas, busca, verArquivados]);
   const cantosArquivados = filas ? filas.filter(m => m.alumnos.activo === false).length : 0;
 
+  const proximosAniversarios = useMemo(() => {
+    if (!filas) return [];
+    return filas
+      .filter(m => m.alumnos.activo !== false && m.alumnos.data_nacemento)
+      .map(m => ({ alumno: m.alumnos, ...proximoAniversario(m.alumnos.data_nacemento) }))
+      .filter(a => a.diasQuedan !== null && a.diasQuedan <= 30)
+      .sort((a,b) => a.diasQuedan - b.diasQuedan)
+      .slice(0, 5);
+  }, [filas]);
+
   async function eliminarAlumno(m) {
     setAbertaId(null);
     if (!confirm(`Eliminar a ${m.alumnos.nome} ${m.alumnos.apelidos||""}? Bórranse TODOS os seus datos (clases, repertorio, cualificacións, titorías...) de TODOS os cursos escolares. Esta acción non se pode desfacer.`)) return;
@@ -935,6 +957,19 @@ function ListaAlumnos({ anoEscolar, onAbrir }) {
 
   return (
     <div className="wrap">
+      {proximosAniversarios.length > 0 && (
+        <div className="card" style={{ borderLeft: "3px solid var(--oro)" }}>
+          <div className="clase-seccion-titulo" style={{ color: "#8a6d1f", marginBottom: 8 }}>🎂 Próximos cumpreanos</div>
+          {proximosAniversarios.map((a,i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13.5, padding: "4px 0" }}>
+              <span>{a.alumno.nome} {a.alumno.apelidos}</span>
+              <span style={{ color: "var(--sepia)" }}>
+                {a.diasQuedan === 0 ? "hoxe!" : a.diasQuedan === 1 ? "mañá" : `${a.dataFormatada} · en ${a.diasQuedan} días`}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="toolbar">
         <input className="search" type="text" placeholder="Buscar alumno…" value={busca} onChange={e=>setBusca(e.target.value)} />
         {cantosArquivados > 0 && (
@@ -2735,6 +2770,51 @@ function TarxetaClase({ fila, obrasDispoñibles, pesos, alumno, expandida, onExp
   const [obras, setObras] = useState(fila.obras || []);
   const [mostrarPdf, setMostrarPdf] = useState(false);
   const [gardando, setGardando] = useState(false);
+
+  // Rede de seguridade: se se escribe e non se chega a saír do campo (cámbiase
+  // de app, bloquéase o móbil, péchase a lapela...), isto garda igualmente.
+  const camposActuaisRef = useRef(null);
+  camposActuaisRef.current = { data, falta, motivoFalta, inicioClase, observacions, tarefas, criterios, obras };
+  const gardadoRef = useRef(null);
+  const timeoutAutogardadoRef = useRef(null);
+  const primeiraVezRef = useRef(true);
+
+  async function gardarSilencioso() {
+    const c = camposActuaisRef.current;
+    if (!c) return;
+    const chave = JSON.stringify(c);
+    if (chave === gardadoRef.current) return;
+    gardadoRef.current = chave;
+    const notas = {};
+    pesos.forEach(p => { notas[p.key] = c.criterios[p.key]; });
+    try {
+      const { error } = await sb.from("clases").update({
+        data: c.data, falta: c.falta, motivo_falta: c.motivoFalta,
+        inicio_clase: c.inicioClase, observacions: c.observacions, tarefas: c.tarefas, notas,
+      }).eq("id", fila.id);
+      if (error) aviso("Non se gardou unha clase automaticamente: " + error.message, "erro");
+      await Promise.all(c.obras.map(o => sb.from("clases_repertorio").update({ progreso: o.progreso }).eq("id", o.id)));
+    } catch (e) {
+      aviso("Non se gardou unha clase automaticamente: " + (e.message || e), "erro");
+    }
+  }
+
+  useEffect(() => {
+    if (primeiraVezRef.current) { primeiraVezRef.current = false; gardadoRef.current = JSON.stringify(camposActuaisRef.current); return; }
+    if (timeoutAutogardadoRef.current) clearTimeout(timeoutAutogardadoRef.current);
+    timeoutAutogardadoRef.current = setTimeout(gardarSilencioso, 1500);
+    return () => { if (timeoutAutogardadoRef.current) clearTimeout(timeoutAutogardadoRef.current); };
+  }, [data, falta, motivoFalta, inicioClase, observacions, tarefas, JSON.stringify(criterios), obras.map(o=>o.progreso).join("\u0001")]);
+
+  useEffect(() => {
+    function aoOcultar() { if (document.hidden) gardarSilencioso(); }
+    document.addEventListener("visibilitychange", aoOcultar);
+    window.addEventListener("pagehide", gardarSilencioso);
+    return () => {
+      document.removeEventListener("visibilitychange", aoOcultar);
+      window.removeEventListener("pagehide", gardarSilencioso);
+    };
+  }, []);
 
   function cambiarCriterio(key, v) { setCriterios(c => ({ ...c, [key]: v })); }
   async function gardarCampo(campos) {
