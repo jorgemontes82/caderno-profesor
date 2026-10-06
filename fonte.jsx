@@ -1519,6 +1519,31 @@ function TagInput({ valores, onChange, placeholder }) {
   );
 }
 
+const NOTAS_ESCALA = ["Do", "Re", "Mi", "Fa", "Sol", "La", "Si"];
+function parsearEscala(t) {
+  const m = (t || "").trim().match(/^(Do|Re|Mi|Fa|Sol|La|Si)\s*(#|b)?\s*(Mayor|menor)$/);
+  return m ? { nota: m[1], alt: m[2] || "", modo: m[3] } : { nota: "Do", alt: "", modo: "Mayor" };
+}
+function tituloEscala(e) { return `${e.nota}${e.alt ? " " + e.alt : ""} ${e.modo}`; }
+function SelectorEscala({ valor, onChange }) {
+  const e = parsearEscala(valor);
+  useEffect(() => { if (!valor) onChange(tituloEscala(e)); }, []);
+  function cambiar(parte) { onChange(tituloEscala({ ...e, ...parte })); }
+  return (
+    <div style={{ display: "flex", gap: 8 }}>
+      <select className="field" style={{ flex: 1 }} value={e.nota} onChange={ev=>cambiar({ nota: ev.target.value })}>
+        {NOTAS_ESCALA.map(n => <option key={n} value={n}>{n}</option>)}
+      </select>
+      <select className="field" style={{ flex: 1 }} value={e.alt} onChange={ev=>cambiar({ alt: ev.target.value })}>
+        <option value="">—</option><option value="#">#</option><option value="b">b</option>
+      </select>
+      <select className="field" style={{ flex: 1.4 }} value={e.modo} onChange={ev=>cambiar({ modo: ev.target.value })}>
+        <option value="Mayor">Mayor</option><option value="menor">menor</option>
+      </select>
+    </div>
+  );
+}
+
 function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
   const [modo, setModo] = useState("rapido");
   const [f, setF] = useState({
@@ -1588,7 +1613,7 @@ function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
     });
     setEngadindo(false);
     if (error) { aviso(error.message, "erro"); return; }
-    setTituloRapido(""); setAutorRapido(""); setTotalRapido(""); setEsColeccion(false);
+    setTituloRapido(tipoRapido === "Escalas" ? tituloRapido : ""); setAutorRapido(""); setTotalRapido(""); setEsColeccion(false);
     if (tituloRef.current) tituloRef.current.focus();
     onGardado(false);
   }
@@ -1598,11 +1623,13 @@ function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
       <Modal title="Nova obra" onClose={onClose}>
         <form onSubmit={engadirRapido}>
           <label>Tipo</label>
-          <select className="field" value={tipoRapido} onChange={e=>setTipoRapido(e.target.value)}>
+          <select className="field" value={tipoRapido} onChange={e=>{ setTipoRapido(e.target.value); setTituloRapido(""); }}>
             {TIPOS_REPERTORIO.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
-          <label>Título</label>
-          <input ref={tituloRef} type="text" value={tituloRapido} onChange={e=>setTituloRapido(e.target.value)} required />
+          <label>{tipoRapido === "Escalas" ? "Escala" : "Título"}</label>
+          {tipoRapido === "Escalas"
+            ? <SelectorEscala key="esc" valor={tituloRapido} onChange={setTituloRapido} />
+            : <input ref={tituloRef} type="text" value={tituloRapido} onChange={e=>setTituloRapido(e.target.value)} required />}
           <label>Autor (opcional)</label>
           <CampoAutor valor={autorRapido} onChange={setAutorRapido} autoresSuxeridos={autoresSuxeridos} />
           <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14 }}>
@@ -1639,10 +1666,14 @@ function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
       )}
       <form onSubmit={gardar}>
         <label>Tipo</label>
-        <select className="field" value={f.tipo} onChange={e=>setF({...f,tipo:e.target.value})}>
+        <select className="field" value={f.tipo} onChange={e=>setF({...f,tipo:e.target.value,titulo:e.target.value==="Escalas"?"":f.titulo})}>
           {TIPOS_REPERTORIO.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
-        <Campo label="Título" value={f.titulo} onChange={e=>setF({...f,titulo:e.target.value})} required />
+        {f.tipo === "Escalas" ? (
+          <React.Fragment><label>Escala</label><SelectorEscala key="esc2" valor={f.titulo} onChange={v=>setF(p=>({...p,titulo:v}))} /></React.Fragment>
+        ) : (
+          <Campo label="Título" value={f.titulo} onChange={e=>setF({...f,titulo:e.target.value})} required />
+        )}
         <label>Autor</label>
         <CampoAutor valor={f.autor} onChange={v=>setF({...f,autor:v})} autoresSuxeridos={autoresSuxeridos} />
         <Campo label="Total de estudos/movementos (se é un libro, colección ou obra con varios movementos)" type="text" inputMode="numeric" value={f.total_estudos} onChange={e=>setF({...f,total_estudos:e.target.value})} />
@@ -1716,12 +1747,18 @@ function PianistasXeral({ anoEscolar }) {
     });
 
     const { data: obras, error: e2 } = await sb.from("repertorio_asignado")
-      .select("*, repertorio_xeral(titulo,autor,pdf_piano_path,pdf_piano_nome)")
+      .select("*, repertorio_xeral(titulo,autor,pdf_piano_path,pdf_piano_nome,libro_id)")
       .in("matricula_id", matriculas.map(m=>m.id))
       .eq("trimestre", trimestre)
       .eq("necesita_acompanamento", true);
     if (e2) { aviso(e2.message, "erro"); return; }
 
+    const idsLibro = [...new Set(obras.map(o => o.repertorio_xeral?.libro_id).filter(Boolean))];
+    const pianoLibro = {};
+    if (idsLibro.length) {
+      const { data: ls } = await sb.from("repertorio_xeral").select("id,pdf_piano_path").in("id", idsLibro);
+      (ls || []).forEach(l => { pianoLibro[l.id] = l.pdf_piano_path; });
+    }
     const agrupado = {};
     obras.forEach(o => {
       const info = infoMatricula[o.matricula_id];
@@ -1734,7 +1771,7 @@ function PianistasXeral({ anoEscolar }) {
         id: o.id, entregada: o.entregada, para_ensaiar: o.para_ensaiar, avisado: o.avisado,
         titulo: tituloConNumero(o.repertorio_xeral?.titulo || o.texto_libre || "?", o.numero_estudo, o.tipo),
         autor: o.repertorio_xeral?.autor || null,
-        pdfPiano: o.repertorio_xeral?.pdf_piano_path || null,
+        pdfPiano: o.repertorio_xeral?.pdf_piano_path || pianoLibro[o.repertorio_xeral?.libro_id] || null,
       });
     });
     setDatos(agrupado);
@@ -2024,9 +2061,9 @@ function TarefasXerais() {
 
       {pendentes.length === 0 && <div className="empty">Sen tarefas pendentes.</div>}
       {pendentes.map(t => (
-        <div key={t.id} className="alumno-row" style={{ cursor: "default" }}>
+        <div key={t.id} className="alumno-row" style={{ cursor: "default", alignItems: "flex-start" }}>
           <input type="checkbox" checked={false} onChange={()=>alternarFeita(t)} style={{ width: 20, height: 20, flexShrink: 0 }} />
-          <div className="info"><div className="nome" style={{ fontWeight: 500 }}>{t.texto}</div></div>
+          <div className="info"><div className="nome" style={{ fontWeight: 500, whiteSpace: "normal", overflow: "visible", textOverflow: "clip", overflowWrap: "anywhere" }}>{t.texto}</div></div>
           <button className="btn btn-ghost" style={{ fontSize: 12, padding: "4px 8px" }} onClick={()=>borrar(t)}>✕</button>
         </div>
       ))}
@@ -2037,9 +2074,9 @@ function TarefasXerais() {
             {mostrarFeitas ? "Ocultar" : "Mostrar"} feitas ({feitas.length})
           </button>
           {mostrarFeitas && feitas.map(t => (
-            <div key={t.id} className="alumno-row" style={{ cursor: "default", opacity: .6 }}>
+            <div key={t.id} className="alumno-row" style={{ cursor: "default", opacity: .6, alignItems: "flex-start" }}>
               <input type="checkbox" checked={true} onChange={()=>alternarFeita(t)} style={{ width: 20, height: 20, flexShrink: 0 }} />
-              <div className="info"><div className="nome" style={{ fontWeight: 500, textDecoration: "line-through" }}>{t.texto}</div></div>
+              <div className="info"><div className="nome" style={{ fontWeight: 500, textDecoration: "line-through", whiteSpace: "normal", overflow: "visible", textOverflow: "clip", overflowWrap: "anywhere" }}>{t.texto}</div></div>
               <button className="btn btn-ghost" style={{ fontSize: 12, padding: "4px 8px" }} onClick={()=>borrar(t)}>✕</button>
             </div>
           ))}
@@ -2132,7 +2169,7 @@ function FormLibro({ libro, onClose, onGardado }) {
 }
 
 function FormPeza({ libro, peza, autoresSuxeridos, onClose, onGardado }) {
-  const [f, setF] = useState({ titulo: peza?.titulo || "", autor: peza?.autor || "" });
+  const [f, setF] = useState({ titulo: peza?.titulo || "", autor: peza?.autor || "", tipo: peza?.tipo || libro.tipo || "Pezas" });
   const [ficheiro, setFicheiro] = useState(null);
   const [ficheiroPiano, setFicheiroPiano] = useState(null);
   const [gardando, setGardando] = useState(false);
@@ -2157,7 +2194,7 @@ function FormPeza({ libro, peza, autoresSuxeridos, onClose, onGardado }) {
       pdf_piano_path = pathP; pdf_piano_nome = ficheiroPiano.name;
     }
     const payload = {
-      titulo: f.titulo, autor: f.autor, tipo: libro.tipo, libro_id: libro.id,
+      titulo: f.titulo, autor: f.autor, tipo: f.tipo, libro_id: libro.id,
       pdf_path, pdf_nome, pdf_piano_path, pdf_piano_nome,
     };
     let error;
@@ -2176,6 +2213,10 @@ function FormPeza({ libro, peza, autoresSuxeridos, onClose, onGardado }) {
   return (
     <Modal title={peza ? "Editar peza" : "Nova peza"} onClose={onClose}>
       <form onSubmit={gardar}>
+        <label>Tipo desta peza</label>
+        <select className="field" value={f.tipo} onChange={e=>setF({...f,tipo:e.target.value})}>
+          {TIPOS_REPERTORIO.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
         <Campo label="Título da peza" value={f.titulo} onChange={e=>setF({...f,titulo:e.target.value})} required />
         <label>Autor</label>
         <CampoAutor valor={f.autor} onChange={v=>setF({...f,autor:v})} autoresSuxeridos={autoresSuxeridos} />
@@ -2245,8 +2286,9 @@ function DetalleLibro({ libro, autoresSuxeridos, onClose, onCambio }) {
         <div key={p.id} className="obra-row">
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="titulo">{p.titulo}</div>
-            {p.autor && <div className="autor">{p.autor}</div>}
+            <div className="autor">{p.tipo}{p.autor ? " · " + p.autor : ""}</div>
           </div>
+          {!p.pdf_path && libroActual.pdf_path && <a className="pdf-link" title="PDF do libro" href={urlPdfRepertorio(libroActual.pdf_path)} target="_blank" rel="noopener noreferrer">📄 Libro</a>}
           {p.pdf_path && <a className="pdf-link" href={urlPdfRepertorio(p.pdf_path)} target="_blank" rel="noopener noreferrer">📄</a>}
           {p.pdf_piano_path && <a className="pdf-link" href={urlPdfRepertorio(p.pdf_piano_path)} target="_blank" rel="noopener noreferrer">🎹</a>}
           <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: 12 }} onClick={()=>setEditandoPeza(p)}>Editar</button>
@@ -2396,8 +2438,8 @@ function RepertorioXeral() {
                   )}
                   {o.observacions && <div style={{ fontSize: 12, color: "var(--sepia)", marginTop: 4 }}>{o.observacions}</div>}
                 </div>
-                {o.pdf_path && (
-                  <a className="pdf-link" href={urlPdfRepertorio(o.pdf_path)} target="_blank" rel="noopener noreferrer">📄 PDF</a>
+                {(o.pdf_path || librosPorIdXeral[o.libro_id]?.pdf_path) && (
+                  <a className="pdf-link" href={urlPdfRepertorio(o.pdf_path || librosPorIdXeral[o.libro_id].pdf_path)} target="_blank" rel="noopener noreferrer">📄 PDF</a>
                 )}
                 {o.pdf_piano_path && (
                   <a className="pdf-link" href={urlPdfRepertorio(o.pdf_piano_path)} target="_blank" rel="noopener noreferrer">🎹 Piano</a>
@@ -2487,7 +2529,7 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
   const [modo, setModo] = useState("catalogo");
   const [seleccionado, setSeleccionado] = useState("");
   const [numerosEstudo, setNumerosEstudo] = useState("");
-  const [textoLibre, setTextoLibre] = useState("");
+  const [textoLibre, setTextoLibre] = useState(tipo === "Escalas" ? "Do Mayor" : "");
   const [ordenando, setOrdenando] = useState(false);
   const [abertaId, setAbertaId] = useState(null);
   const [historialAberto, setHistorialAberto] = useState(null);
@@ -2497,6 +2539,7 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
     catalogo.filter(o => o.es_libro).forEach(l => { m[l.id] = l.titulo; });
     return m;
   }, [catalogo]);
+  const pdfLibroDe = (x) => x && (x.pdf_path || (x.libro_id ? catalogo.find(l => l.id === x.libro_id)?.pdf_path : null));
   const libroSeleccionado = seleccionado ? opcionsCatalogo.find(o => o.id === seleccionado) : null;
   const esLibro = libroSeleccionado && libroSeleccionado.total_estudos;
 
@@ -2526,7 +2569,7 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
       const { error } = await sb.from("repertorio_asignado").insert(payload);
       if (error) { aviso(error.message, "erro"); return; }
     }
-    setSeleccionado(""); setNumerosEstudo(""); setTextoLibre(""); setMostrarAdd(false);
+    setSeleccionado(""); setNumerosEstudo(""); setTextoLibre(tipo === "Escalas" ? "Do Mayor" : ""); setMostrarAdd(false);
     onCambio();
   }
   async function quitar(id) {
@@ -2587,8 +2630,8 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
               {item.necesita_acompanamento && <span className="chip" style={{ background: "#f3e8fd", color: "#7a3bc4" }}>Acompañamento</span>}
               {item.audicion && <span className="chip" style={{ background: "#fdeee0", color: "#b5620a" }}>Audición</span>}
             </div>
-            {xeral && xeral.pdf_path && (
-              <a className="pdf-link" href={urlPdfRepertorio(xeral.pdf_path)} target="_blank" rel="noopener noreferrer">📄</a>
+            {xeral && pdfLibroDe(xeral) && (
+              <a className="pdf-link" href={urlPdfRepertorio(pdfLibroDe(xeral))} target="_blank" rel="noopener noreferrer">📄</a>
             )}
             <button className="btn btn-ghost" style={{ padding: "3px 8px", fontSize: 11.5 }} onClick={()=>setHistorialAberto(item)}>
               Historial
@@ -2637,7 +2680,9 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
               )}
             </React.Fragment>
           ) : (
-            <input type="text" placeholder="Nome da obra" value={textoLibre} onChange={e=>setTextoLibre(e.target.value)} />
+            tipo === "Escalas"
+              ? <SelectorEscala valor={textoLibre} onChange={setTextoLibre} />
+              : <input type="text" placeholder="Nome da obra" value={textoLibre} onChange={e=>setTextoLibre(e.target.value)} />
           )}
           <div className="row-actions">
             <button type="button" className="btn" onClick={()=>setMostrarAdd(false)}>Cancelar</button>
