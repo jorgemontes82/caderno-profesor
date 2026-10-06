@@ -308,6 +308,7 @@ const PESOS_AUDICION = [
     { key: "posta_en_escena", label: "Posta en escea", peso: 0.30 },
 ];
 const TIPOS_REPERTORIO = ["Escalas", "Exercicios", "Estudos", "Concertos", "Sonatas", "Pezas"];
+const TIPOS_CATALOGO = TIPOS_REPERTORIO.filter(t => t !== "Escalas");
 const TRIMESTRES = [
     { n: 1, label: "1º Trimestre" },
     { n: 2, label: "2º Trimestre" },
@@ -1917,7 +1918,7 @@ function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
         return (React.createElement(Modal, { title: "Nova obra", onClose: onClose },
             React.createElement("form", { onSubmit: engadirRapido },
                 React.createElement("label", null, "Tipo"),
-                React.createElement("select", { className: "field", value: tipoRapido, onChange: e => { setTipoRapido(e.target.value); setTituloRapido(""); } }, TIPOS_REPERTORIO.map(t => React.createElement("option", { key: t, value: t }, t))),
+                React.createElement("select", { className: "field", value: tipoRapido, onChange: e => { setTipoRapido(e.target.value); setTituloRapido(""); } }, TIPOS_CATALOGO.map(t => React.createElement("option", { key: t, value: t }, t))),
                 React.createElement("label", null, tipoRapido === "Escalas" ? "Escala" : "Título"),
                 tipoRapido === "Escalas"
                     ? React.createElement(SelectorEscala, { key: "esc", valor: tituloRapido, onChange: setTituloRapido })
@@ -1942,7 +1943,7 @@ function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
         !obra && (React.createElement("button", { type: "button", className: "btn btn-ghost", style: { padding: "2px 0", marginBottom: 8, fontSize: 12.5 }, onClick: () => setModo("rapido") }, "\u2190 Usar engadido r\u00E1pido (autor + n\u00FAmero)")),
         React.createElement("form", { onSubmit: gardar },
             React.createElement("label", null, "Tipo"),
-            React.createElement("select", { className: "field", value: f.tipo, onChange: e => setF(Object.assign(Object.assign({}, f), { tipo: e.target.value, titulo: e.target.value === "Escalas" ? "" : f.titulo })) }, TIPOS_REPERTORIO.map(t => React.createElement("option", { key: t, value: t }, t))),
+            React.createElement("select", { className: "field", value: f.tipo, onChange: e => setF(Object.assign(Object.assign({}, f), { tipo: e.target.value, titulo: e.target.value === "Escalas" ? "" : f.titulo })) }, TIPOS_CATALOGO.map(t => React.createElement("option", { key: t, value: t }, t))),
             f.tipo === "Escalas" ? (React.createElement(React.Fragment, null,
                 React.createElement("label", null, "Escala"),
                 React.createElement(SelectorEscala, { key: "esc2", valor: f.titulo, onChange: v => setF(p => (Object.assign(Object.assign({}, p), { titulo: v }))) }))) : (React.createElement(Campo, { label: "T\u00EDtulo", value: f.titulo, onChange: e => setF(Object.assign(Object.assign({}, f), { titulo: e.target.value })), required: true })),
@@ -2418,7 +2419,7 @@ function FormLibro({ libro, onClose, onGardado }) {
             React.createElement(Campo, { label: "T\u00EDtulo do libro", value: f.titulo, onChange: e => setF(Object.assign(Object.assign({}, f), { titulo: e.target.value })), required: true }),
             React.createElement(Campo, { label: "Autor / Compilador", value: f.autor, onChange: e => setF(Object.assign(Object.assign({}, f), { autor: e.target.value })) }),
             React.createElement("label", null, "Tipo das pezas que cont\u00E9n"),
-            React.createElement("select", { className: "field", value: f.tipo, onChange: e => setF(Object.assign(Object.assign({}, f), { tipo: e.target.value })) }, TIPOS_REPERTORIO.map(t => React.createElement("option", { key: t, value: t }, t))),
+            React.createElement("select", { className: "field", value: f.tipo, onChange: e => setF(Object.assign(Object.assign({}, f), { tipo: e.target.value })) }, TIPOS_CATALOGO.map(t => React.createElement("option", { key: t, value: t }, t))),
             React.createElement("label", null,
                 "PDF do libro completo",
                 (libro === null || libro === void 0 ? void 0 : libro.pdf_nome) ? ` (actual: ${libro.pdf_nome})` : ""),
@@ -2485,7 +2486,7 @@ function FormPeza({ libro, peza, autoresSuxeridos, onClose, onGardado }) {
     return (React.createElement(Modal, { title: peza ? "Editar peza" : "Nova peza", onClose: onClose },
         React.createElement("form", { onSubmit: gardar },
             React.createElement("label", null, "Tipo desta peza"),
-            React.createElement("select", { className: "field", value: f.tipo, onChange: e => setF(Object.assign(Object.assign({}, f), { tipo: e.target.value })) }, TIPOS_REPERTORIO.map(t => React.createElement("option", { key: t, value: t }, t))),
+            React.createElement("select", { className: "field", value: f.tipo, onChange: e => setF(Object.assign(Object.assign({}, f), { tipo: e.target.value })) }, TIPOS_CATALOGO.map(t => React.createElement("option", { key: t, value: t }, t))),
             React.createElement(Campo, { label: "T\u00EDtulo da peza", value: f.titulo, onChange: e => setF(Object.assign(Object.assign({}, f), { titulo: e.target.value })), required: true }),
             React.createElement("label", null, "Autor"),
             React.createElement(CampoAutor, { valor: f.autor, onChange: v => setF(Object.assign(Object.assign({}, f), { autor: v })), autoresSuxeridos: autoresSuxeridos }),
@@ -2635,7 +2636,7 @@ function RepertorioXeral() {
     }, [obrasSoltas, filtroTipo, busca, librosPorIdXeral]);
     const agrupadas = useMemo(() => {
         const g = {};
-        TIPOS_REPERTORIO.forEach(t => g[t] = []);
+        TIPOS_CATALOGO.forEach(t => g[t] = []);
         filtradas.forEach(o => { (g[o.tipo] = g[o.tipo] || []).push(o); });
         return g;
     }, [filtradas]);
@@ -2655,8 +2656,8 @@ function RepertorioXeral() {
                 React.createElement("input", { className: "search", type: "text", placeholder: "Buscar t\u00EDtulo, autor ou nivel\u2026", value: busca, onChange: e => setBusca(e.target.value) }),
                 React.createElement("select", { className: "field", style: { maxWidth: 170 }, value: filtroTipo, onChange: e => setFiltroTipo(e.target.value) },
                     React.createElement("option", { value: "" }, "Todos os tipos"),
-                    TIPOS_REPERTORIO.map(t => React.createElement("option", { key: t, value: t }, t)))),
-            TIPOS_REPERTORIO.map(tipo => ((!filtroTipo || filtroTipo === tipo) && agrupadas[tipo] && agrupadas[tipo].length > 0 && (React.createElement("div", { className: "grupo-tipo card", key: tipo },
+                    TIPOS_CATALOGO.map(t => React.createElement("option", { key: t, value: t }, t)))),
+            TIPOS_CATALOGO.map(tipo => ((!filtroTipo || filtroTipo === tipo) && agrupadas[tipo] && agrupadas[tipo].length > 0 && (React.createElement("div", { className: "grupo-tipo card", key: tipo },
                 React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
                     React.createElement("h4", { style: { margin: 0 } }, tipo),
                     agrupadas[tipo].length > 1 && (React.createElement("button", { type: "button", className: "btn btn-ghost", style: { fontSize: 11, padding: "3px 8px" }, onClick: () => alternarOrdenar(tipo) }, tiposOrdenando[tipo] ? "Feito" : "Ordenar"))),
@@ -2730,7 +2731,7 @@ function HistorialObra({ titulo, matriculaId, repertorioAsignadoId, onClose }) {
 }
 function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, onCambio }) {
     const [mostrarAdd, setMostrarAdd] = useState(false);
-    const [modo, setModo] = useState("catalogo");
+    const [modo, setModo] = useState(tipo === "Escalas" ? "man" : "catalogo");
     const [seleccionado, setSeleccionado] = useState("");
     const [numerosEstudo, setNumerosEstudo] = useState("");
     const [textoLibre, setTextoLibre] = useState(tipo === "Escalas" ? "Do Mayor" : "");
@@ -2838,7 +2839,7 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
                     React.createElement("button", { className: "btn btn-ghost", style: { padding: "3px 8px", fontSize: 11.5 }, onClick: () => alternarCompletada(item) }, item.completada ? "Reabrir" : "Completada"))));
         }),
         mostrarAdd ? (React.createElement("form", { onSubmit: engadir, style: { marginTop: 10, borderTop: "1px solid var(--crema)", paddingTop: 10 } },
-            React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 8 } },
+            tipo !== "Escalas" && React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 8 } },
                 React.createElement("button", { type: "button", className: modo === "catalogo" ? "btn btn-primary" : "btn", style: { fontSize: 12, padding: "5px 10px" }, onClick: () => setModo("catalogo") }, "Do repertorio xeral"),
                 React.createElement("button", { type: "button", className: modo === "man" ? "btn btn-primary" : "btn", style: { fontSize: 12, padding: "5px 10px" }, onClick: () => setModo("man") }, "Escribir a man")),
             modo === "catalogo" ? (React.createElement(React.Fragment, null,

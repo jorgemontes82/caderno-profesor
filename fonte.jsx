@@ -46,6 +46,7 @@ const PESOS_AUDICION = [
   { key: "posta_en_escena",     label: "Posta en escea",      peso: 0.30 },
 ];
 const TIPOS_REPERTORIO = ["Escalas", "Exercicios", "Estudos", "Concertos", "Sonatas", "Pezas"];
+const TIPOS_CATALOGO = TIPOS_REPERTORIO.filter(t => t !== "Escalas");
 const TRIMESTRES = [
   { n: 1, label: "1º Trimestre" },
   { n: 2, label: "2º Trimestre" },
@@ -1624,7 +1625,7 @@ function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
         <form onSubmit={engadirRapido}>
           <label>Tipo</label>
           <select className="field" value={tipoRapido} onChange={e=>{ setTipoRapido(e.target.value); setTituloRapido(""); }}>
-            {TIPOS_REPERTORIO.map(t => <option key={t} value={t}>{t}</option>)}
+            {TIPOS_CATALOGO.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
           <label>{tipoRapido === "Escalas" ? "Escala" : "Título"}</label>
           {tipoRapido === "Escalas"
@@ -1667,7 +1668,7 @@ function FormObraXeral({ obra, autoresSuxeridos, onClose, onGardado }) {
       <form onSubmit={gardar}>
         <label>Tipo</label>
         <select className="field" value={f.tipo} onChange={e=>setF({...f,tipo:e.target.value,titulo:e.target.value==="Escalas"?"":f.titulo})}>
-          {TIPOS_REPERTORIO.map(t => <option key={t} value={t}>{t}</option>)}
+          {TIPOS_CATALOGO.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
         {f.tipo === "Escalas" ? (
           <React.Fragment><label>Escala</label><SelectorEscala key="esc2" valor={f.titulo} onChange={v=>setF(p=>({...p,titulo:v}))} /></React.Fragment>
@@ -2154,7 +2155,7 @@ function FormLibro({ libro, onClose, onGardado }) {
         <Campo label="Autor / Compilador" value={f.autor} onChange={e=>setF({...f,autor:e.target.value})} />
         <label>Tipo das pezas que contén</label>
         <select className="field" value={f.tipo} onChange={e=>setF({...f,tipo:e.target.value})}>
-          {TIPOS_REPERTORIO.map(t => <option key={t} value={t}>{t}</option>)}
+          {TIPOS_CATALOGO.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
         <label>PDF do libro completo{libro?.pdf_nome ? ` (actual: ${libro.pdf_nome})` : ""}</label>
         <input type="file" accept="application/pdf" onChange={e=>setFicheiro(e.target.files[0])} />
@@ -2215,7 +2216,7 @@ function FormPeza({ libro, peza, autoresSuxeridos, onClose, onGardado }) {
       <form onSubmit={gardar}>
         <label>Tipo desta peza</label>
         <select className="field" value={f.tipo} onChange={e=>setF({...f,tipo:e.target.value})}>
-          {TIPOS_REPERTORIO.map(t => <option key={t} value={t}>{t}</option>)}
+          {TIPOS_CATALOGO.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
         <Campo label="Título da peza" value={f.titulo} onChange={e=>setF({...f,titulo:e.target.value})} required />
         <label>Autor</label>
@@ -2380,7 +2381,7 @@ function RepertorioXeral() {
 
   const agrupadas = useMemo(() => {
     const g = {};
-    TIPOS_REPERTORIO.forEach(t => g[t] = []);
+    TIPOS_CATALOGO.forEach(t => g[t] = []);
     filtradas.forEach(o => { (g[o.tipo] = g[o.tipo] || []).push(o); });
     return g;
   }, [filtradas]);
@@ -2401,11 +2402,11 @@ function RepertorioXeral() {
         <input className="search" type="text" placeholder="Buscar título, autor ou nivel…" value={busca} onChange={e=>setBusca(e.target.value)} />
         <select className="field" style={{ maxWidth: 170 }} value={filtroTipo} onChange={e=>setFiltroTipo(e.target.value)}>
           <option value="">Todos os tipos</option>
-          {TIPOS_REPERTORIO.map(t => <option key={t} value={t}>{t}</option>)}
+          {TIPOS_CATALOGO.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
       </div>
 
-      {TIPOS_REPERTORIO.map(tipo => (
+      {TIPOS_CATALOGO.map(tipo => (
         (!filtroTipo || filtroTipo === tipo) && agrupadas[tipo] && agrupadas[tipo].length > 0 && (
           <div className="grupo-tipo card" key={tipo}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -2526,7 +2527,7 @@ function HistorialObra({ titulo, matriculaId, repertorioAsignadoId, onClose }) {
 
 function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, onCambio }) {
   const [mostrarAdd, setMostrarAdd] = useState(false);
-  const [modo, setModo] = useState("catalogo");
+  const [modo, setModo] = useState(tipo === "Escalas" ? "man" : "catalogo");
   const [seleccionado, setSeleccionado] = useState("");
   const [numerosEstudo, setNumerosEstudo] = useState("");
   const [textoLibre, setTextoLibre] = useState(tipo === "Escalas" ? "Do Mayor" : "");
@@ -2654,10 +2655,10 @@ function SeccionRepertorioTipo({ matriculaId, trimestre, tipo, catalogo, itens, 
 
       {mostrarAdd ? (
         <form onSubmit={engadir} style={{ marginTop: 10, borderTop: "1px solid var(--crema)", paddingTop: 10 }}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          {tipo !== "Escalas" && <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
             <button type="button" className={modo==="catalogo" ? "btn btn-primary" : "btn"} style={{ fontSize: 12, padding: "5px 10px" }} onClick={()=>setModo("catalogo")}>Do repertorio xeral</button>
             <button type="button" className={modo==="man" ? "btn btn-primary" : "btn"} style={{ fontSize: 12, padding: "5px 10px" }} onClick={()=>setModo("man")}>Escribir a man</button>
-          </div>
+          </div>}
           {modo === "catalogo" ? (
             <React.Fragment>
               <select className="field" value={seleccionado} onChange={e=>{ setSeleccionado(e.target.value); setNumerosEstudo(""); }}>
