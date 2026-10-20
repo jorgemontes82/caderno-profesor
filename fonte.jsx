@@ -377,6 +377,17 @@ function trimestreActual() {
   return 3;
 }
 
+async function titulosLibros(filas) {
+  const ids = [...new Set((filas || []).map(r => r.repertorio_xeral?.libro_id).filter(Boolean))];
+  const m = {};
+  if (ids.length) {
+    const { data } = await sb.from("repertorio_xeral").select("id,titulo").in("id", ids);
+    (data || []).forEach(l => { m[l.id] = l.titulo; });
+  }
+  return m;
+}
+const sufixoLibro = r => r.libro ? ` (libro: ${r.libro})` : "";
+
 function exportarInformeSustitutoPDF(anoEscolar, trimestre, detalles) {
   const doc = new window.jspdf.jsPDF();
   cabeceiraPDF(doc, `Informe para substituto — ${trimestre}º trimestre`);
@@ -396,39 +407,61 @@ function exportarInformeSustitutoPDF(anoEscolar, trimestre, detalles) {
     doc.setTextColor(10, 37, 64); doc.setFontSize(9.5); doc.setFont(undefined, "normal");
     doc.text(`${d.curso || "-"} · ${labelGrao(d.grao)} · Horario: ${textoHorarios(d.horario)}`, 14, y); y += 5;
 
+    doc.text(`Pianista acompañante: ${d.pianista || "sen asignar"}`, 14, y); y += 5;
     const contactos = [
       d.alumno.telefono_pai ? `Pai: ${d.alumno.telefono_pai}` : null,
       d.alumno.telefono_nai ? `Nai: ${d.alumno.telefono_nai}` : null,
     ].filter(Boolean).join("   ·   ");
     if (contactos) { doc.text(contactos, 14, y); y += 6; } else { y += 2; }
 
-    if (d.repertorio.length) {
+    if (d.completadas.length) {
       y = asegurarEspazo(doc, y, 8);
-      doc.setFont(undefined, "bold"); doc.text("Repertorio actual:", 14, y); y += 5;
+      doc.setFont(undefined, "bold"); doc.text("Repertorio completado:", 14, y); y += 5;
       doc.setFont(undefined, "normal");
-      d.repertorio.forEach(r => {
-        const lineas = doc.splitTextToSize(`• [${r.tipo}] ${r.titulo}${r.autor ? " — " + r.autor : ""}`, 178);
+      d.completadas.forEach(r => {
+        const lineas = doc.splitTextToSize(`• [${r.tipo}] ${r.titulo}${r.autor ? " — " + r.autor : ""}${sufixoLibro(r)}`, 178);
         y = asegurarEspazo(doc, y, lineas.length * 5);
         doc.text(lineas, 16, y); y += lineas.length * 5;
       });
       y += 2;
     }
-    if (d.clasesRecentes.length) {
+    if (d.repertorio.length) {
       y = asegurarEspazo(doc, y, 8);
-      doc.setFont(undefined, "bold"); doc.text("Últimas clases:", 14, y); y += 5;
-      doc.setFont(undefined, "normal");
-      d.clasesRecentes.forEach(c => {
-        if (c.observacions) {
-          const lineas = doc.splitTextToSize(`${formatarDataCurta(c.data)}: ${c.observacions}`, 178);
-          y = asegurarEspazo(doc, y, lineas.length * 5);
-          doc.text(lineas, 16, y); y += lineas.length * 5;
-        }
-        c.obras.forEach(o => {
-          if (!o.progreso) return;
-          const lineas = doc.splitTextToSize(`- ${o.titulo}: ${o.progreso}`, 174);
-          y = asegurarEspazo(doc, y, lineas.length * 5);
-          doc.text(lineas, 18, y); y += lineas.length * 5;
+      doc.setFont(undefined, "bold"); doc.text("Repertorio actual:", 14, y); y += 5;
+      d.repertorio.forEach(r => {
+        const lineas = doc.splitTextToSize(`• [${r.tipo}] ${r.titulo}${r.autor ? " — " + r.autor : ""}${sufixoLibro(r)}`, 178);
+        y = asegurarEspazo(doc, y, lineas.length * 5);
+        doc.setFont(undefined, "bold"); doc.text(lineas, 16, y); y += lineas.length * 5;
+        doc.setFont(undefined, "normal");
+        r.historial.forEach(h => {
+          const ls = doc.splitTextToSize(`${formatarDataCurta(h.data)}: ${h.progreso}`, 168);
+          y = asegurarEspazo(doc, y, ls.length * 5);
+          doc.text(ls, 22, y); y += ls.length * 5;
         });
+        y += 1;
+      });
+      y += 2;
+    }
+    if (d.acompanadas.length) {
+      y = asegurarEspazo(doc, y, 8);
+      doc.setFont(undefined, "bold"); doc.text(`Obras con pianista${d.pianista ? " (" + d.pianista + ")" : ""}:`, 14, y); y += 5;
+      doc.setFont(undefined, "normal");
+      d.acompanadas.forEach(r => {
+        const estado = [r.audicion ? "audición" : null, r.entregada ? "partitura entregada" : "partitura sen entregar", r.para_ensaiar ? "para ensaiar" : "non para ensaiar"].filter(Boolean).join(" · ");
+        const lineas = doc.splitTextToSize(`• ${r.titulo}${r.autor ? " — " + r.autor : ""}${sufixoLibro(r)} (${estado})`, 178);
+        y = asegurarEspazo(doc, y, lineas.length * 5);
+        doc.text(lineas, 16, y); y += lineas.length * 5;
+      });
+      y += 2;
+    }
+    if (d.iniciosClase.length) {
+      y = asegurarEspazo(doc, y, 8);
+      doc.setFont(undefined, "bold"); doc.text("Inicio das clases (observacións):", 14, y); y += 5;
+      doc.setFont(undefined, "normal");
+      d.iniciosClase.forEach(c => {
+        const lineas = doc.splitTextToSize(`${formatarDataCurta(c.data)}: ${c.texto}`, 178);
+        y = asegurarEspazo(doc, y, lineas.length * 5);
+        doc.text(lineas, 16, y); y += lineas.length * 5;
       });
     }
     y += 6;
@@ -440,7 +473,7 @@ function exportarInformeSustitutoPDF(anoEscolar, trimestre, detalles) {
 async function xerarInformeSustitutoParaCurso(anoEscolar) {
   const { data, error } = await sb
     .from("matriculas")
-    .select("*, alumnos(*), materias(nome, horarios_materia(dia_semana,hora))")
+    .select("*, alumnos(*), materias(nome, pianista_acompanante, horarios_materia(dia_semana,hora))")
     .eq("curso_escolar", anoEscolar)
     .order("created_at", { ascending: true });
   if (error) { aviso("Erro ao cargar alumnos: " + error.message, "erro"); return; }
@@ -449,31 +482,37 @@ async function xerarInformeSustitutoParaCurso(anoEscolar) {
     .map(m => {
       const materiaViolin = (m.materias || []).find(x => (x.nome||"").toLowerCase().includes("violín"))
         || (m.materias || [])[0] || null;
-      return { ...m, horarioViolin: materiaViolin ? materiaViolin.horarios_materia : [] };
+      return { ...m, horarioViolin: materiaViolin ? materiaViolin.horarios_materia : [], pianista: (materiaViolin?.pianista_acompanante || "").trim() };
     });
   if (!filas.length) { aviso(`Non hai alumnos matriculados en ${anoEscolar}.`, "erro"); return; }
 
   const trimestre = trimestreActual();
   const detalles = await Promise.all(filas.map(async (m) => {
-    const [{ data: repertorio }, { data: clasesRecentes }] = await Promise.all([
-      sb.from("repertorio_asignado").select("*, repertorio_xeral(titulo,autor)")
-        .eq("matricula_id", m.id).eq("trimestre", trimestre).eq("completada", false).order("tipo"),
-      sb.from("clases").select("*, clases_repertorio(*, repertorio_asignado(texto_libre, numero_estudo, tipo, repertorio_xeral(titulo)))")
+    const [{ data: repertorio }, { data: completadas }, { data: clases }] = await Promise.all([
+      sb.from("repertorio_asignado").select("*, repertorio_xeral(titulo,autor,libro_id)")
+        .eq("matricula_id", m.id).eq("trimestre", trimestre).eq("completada", false).order("tipo").order("orde"),
+      sb.from("repertorio_asignado").select("*, repertorio_xeral(titulo,autor,libro_id)")
+        .eq("matricula_id", m.id).eq("completada", true).order("tipo").order("orde"),
+      sb.from("clases").select("data, inicio_clase, clases_repertorio(repertorio_asignado_id, progreso)")
         .eq("matricula_id", m.id).eq("trimestre", trimestre).eq("falta", false)
-        .order("data", { ascending: false }).limit(3),
+        .order("data", { ascending: true }),
     ]);
+    const libros = await titulosLibros([...(repertorio||[]), ...(completadas||[])]);
+    const historialPorObra = {};
+    (clases||[]).forEach(c => (c.clases_repertorio||[]).forEach(cr => {
+      if (!cr.progreso || !cr.progreso.trim()) return;
+      (historialPorObra[cr.repertorio_asignado_id] = historialPorObra[cr.repertorio_asignado_id] || []).push({ data: c.data, progreso: cr.progreso.trim() });
+    }));
+    const mapa = r => ({
+      tipo: r.tipo, titulo: tituloConNumero(r.repertorio_xeral?.titulo || r.texto_libre, r.numero_estudo, r.tipo), autor: r.repertorio_xeral?.autor,
+      libro: libros[r.repertorio_xeral?.libro_id] || null,
+    });
     return {
-      alumno: m.alumnos, curso: m.curso, grao: m.grao, horario: m.horarioViolin,
-      repertorio: (repertorio||[]).map(r => ({
-        tipo: r.tipo, titulo: tituloConNumero(r.repertorio_xeral?.titulo || r.texto_libre, r.numero_estudo, r.tipo), autor: r.repertorio_xeral?.autor,
-      })),
-      clasesRecentes: (clasesRecentes||[]).map(c => ({
-        data: c.data, observacions: c.observacions,
-        obras: (c.clases_repertorio||[]).map(cr => ({
-          titulo: tituloConNumero(cr.repertorio_asignado?.repertorio_xeral?.titulo || cr.repertorio_asignado?.texto_libre || "?", cr.repertorio_asignado?.numero_estudo, cr.repertorio_asignado?.tipo),
-          progreso: cr.progreso,
-        })),
-      })),
+      alumno: m.alumnos, curso: m.curso, grao: m.grao, horario: m.horarioViolin, pianista: m.pianista,
+      acompanadas: (repertorio||[]).filter(r => r.necesita_acompanamento).map(r => ({ ...mapa(r), entregada: !!r.entregada, para_ensaiar: !!r.para_ensaiar, audicion: !!r.audicion })),
+      completadas: (completadas||[]).map(mapa),
+      repertorio: (repertorio||[]).map(r => ({ ...mapa(r), historial: historialPorObra[r.id] || [] })),
+      iniciosClase: (clases||[]).filter(c => c.inicio_clase && c.inicio_clase.trim()).map(c => ({ data: c.data, texto: c.inicio_clase.trim() })),
     };
   }));
   exportarInformeSustitutoPDF(anoEscolar, trimestre, detalles);
@@ -1713,7 +1752,7 @@ function exportarPianistaPDF(nomePianista, trimestreLabel, listaAlumnos) {
     doc.text(`${a.curso || "-"} · ${labelGrao(a.grao)}`, 14, y); y += 7;
     doc.setFontSize(10); doc.setTextColor(10, 37, 64);
     a.obras.forEach(o => {
-      const lineas = doc.splitTextToSize(`• ${o.titulo}${o.autor ? " — " + o.autor : ""}`, 178);
+      const lineas = doc.splitTextToSize(`• ${o.titulo}${o.autor ? " — " + o.autor : ""}${sufixoLibro(o)}`, 178);
       y = asegurarEspazo(doc, y, lineas.length*5.5);
       doc.text(lineas, 16, y); y += lineas.length*5.5;
     });
@@ -1755,10 +1794,10 @@ function PianistasXeral({ anoEscolar }) {
     if (e2) { aviso(e2.message, "erro"); return; }
 
     const idsLibro = [...new Set(obras.map(o => o.repertorio_xeral?.libro_id).filter(Boolean))];
-    const pianoLibro = {};
+    const pianoLibro = {}; const nomeLibro = {};
     if (idsLibro.length) {
-      const { data: ls } = await sb.from("repertorio_xeral").select("id,pdf_piano_path").in("id", idsLibro);
-      (ls || []).forEach(l => { pianoLibro[l.id] = l.pdf_piano_path; });
+      const { data: ls } = await sb.from("repertorio_xeral").select("id,titulo,pdf_piano_path").in("id", idsLibro);
+      (ls || []).forEach(l => { pianoLibro[l.id] = l.pdf_piano_path; nomeLibro[l.id] = l.titulo; });
     }
     const agrupado = {};
     obras.forEach(o => {
@@ -1772,6 +1811,7 @@ function PianistasXeral({ anoEscolar }) {
         id: o.id, entregada: o.entregada, para_ensaiar: o.para_ensaiar, avisado: o.avisado,
         titulo: tituloConNumero(o.repertorio_xeral?.titulo || o.texto_libre || "?", o.numero_estudo, o.tipo),
         autor: o.repertorio_xeral?.autor || null,
+        libro: nomeLibro[o.repertorio_xeral?.libro_id] || null,
         pdfPiano: o.repertorio_xeral?.pdf_piano_path || pianoLibro[o.repertorio_xeral?.libro_id] || null,
       });
     });
@@ -1850,7 +1890,7 @@ function PianistasXeral({ anoEscolar }) {
               {a.obras.map(o => (
                 <div key={o.id} style={{ padding: "6px 0", borderBottom: "1px solid var(--crema)" }}>
                   <div style={{ fontSize: 13.5, marginBottom: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <span>{o.titulo}{o.autor ? ` — ${o.autor}` : ""}</span>
+                    <span>{o.titulo}{o.autor ? ` — ${o.autor}` : ""}{o.libro ? ` (libro: ${o.libro})` : ""}</span>
                     {o.pdfPiano && (
                       <a className="pdf-link" href={urlPdfRepertorio(o.pdfPiano)} target="_blank" rel="noopener noreferrer">🎹 Ver parte de piano</a>
                     )}
